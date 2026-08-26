@@ -1,0 +1,12 @@
+{
+  "name": "AI Ops Dashboard",
+  "short_name": "AI Ops",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#15161a",
+  "theme_color": "#15161a",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

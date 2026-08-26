@@ -1,0 +1,310 @@
+import { supabase } from './supabase-client.js';
+import { signInWithGoogle, signOut, getSession, onAuthChange, getCachedGoogleToken } from './auth.js';
+import {
+  loadProjects,
+  loadFiles,
+  addProject,
+  updateProject,
+  setFileStatus,
+  syncProject,
+  fileStage,
+} from './ingestion.js';
+
+const el = (id) => document.getElementById(id);
+
+let state = {
+  session: null,
+  projects: [],
+  activeProjectId: null,
+  files: [],
+  editingProjectId: null, // set when the dialog is open in "edit" mode
+};
+
+// ---------------- Auth wiring ----------------
+
+el('btn-sign-in').addEventListener('click', async () => {
+  el('auth-error').hidden = true;
+  try {
+    await signInWithGoogle();
+  } catch (err) {
+    el('auth-error').textContent = err.message || 'Sign-in failed.';
+    el('auth-error').hidden = false;
+  }
+});
+
+el('btn-sign-out').addEventListener('click', async () => {
+  await signOut();
+  window.location.reload();
+});
+
+onAuthChange((_event, session) => {
+  state.session = session;
+  renderAuthState();
+});
+
+async function init() {
+  state.session = await getSession();
+  renderAuthState();
+  if (state.session) await bootApp();
+}
+
+function renderAuthState() {
+  const signedIn = !!state.session;
+  el('auth-screen').hidden = signedIn;
+  el('app-shell').hidden = !signedIn;
+  if (signedIn) {
+    el('user-email').textContent = state.session.user?.email || 'Signed in';
+  }
+}
+
+async function bootApp() {
+  await refreshProjects();
+}
+
+// ---------------- Nav ----------------
+
+document.querySelectorAll('.nav-item').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    const view = btn.dataset.view;
+    document.querySelectorAll('.view').forEach((v) => (v.hidden = true));
+    el(`view-${view}`).hidden = false;
+  });
+});
+
+// ---------------- Ingestion: projects ----------------
+
+async function refreshProjects() {
+  state.projects = await loadProjects();
+  renderProjectBar();
+  if (!state.activeProjectId && state.projects.length > 0) {
+    selectProject(state.projects[0].id);
+  } else if (state.projects.length === 0) {
+    el('project-panel').hidden = true;
+    el('no-project-state').hidden = false;
+  }
+}
+
+function renderProjectBar() {
+  const bar = el('project-bar');
+  bar.innerHTML = '';
+  for (const p of state.projects) {
+    const chip = document.createElement('button');
+    chip.className = 'project-chip' + (p.id === state.activeProjectId ? ' is-active' : '');
+    chip.innerHTML = `${escapeHtml(p.display_name)}`;
+    chip.addEventListener('click', () => selectProject(p.id));
+    bar.appendChild(chip);
+  }
+}
+
+async function selectProject(projectId) {
+  state.activeProjectId = projectId;
+  renderProjectBar();
+  const project = state.projects.find((p) => p.id === projectId);
+  if (!project) return;
+
+  el('no-project-state').hidden = true;
+  el('project-panel').hidden = false;
+  el('sync-status').hidden = true;
+
+  el('project-title').textContent = project.display_name;
+  el('project-meta').textContent =
+    `bucket: ${project.gcs_bucket_name || '—'}` +
+    `  ·  drive folder: ${project.drive_folder_id || 'not set'}` +
+    (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '');
+
+  state.files = await loadFiles(projectId);
+  renderFileTable();
+}
+
+// ---------------- Sync ----------------
+
+el('btn-sync').addEventListener('click', async () => {
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  if (!project) return;
+
+  if (!project.drive_folder_id || !project.gcs_bucket_name) {
+    showSyncStatus('Set a Drive folder ID and GCS bucket name for this project first (Edit).', true);
+    return;
+  }
+
+  const token = getCachedGoogleToken();
+  if (!token) {
+    showSyncStatus('Your Google session for Drive/Cloud Storage has expired. Sign out and back in to refresh it.', true);
+    return;
+  }
+
+  const btn = el('btn-sync');
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  showSyncStatus('Pulling current state from Drive and Cloud Storage…', false);
+
+  try {
+    const result = await syncProject(project, token);
+    state.files = await loadFiles(project.id);
+    renderFileTable();
+    showSyncStatus(`Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.`, false, true);
+  } catch (err) {
+    showSyncStatus(err.message || 'Sync failed.', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sync now';
+  }
+});
+
+function showSyncStatus(message, isError, isSuccess) {
+  const box = el('sync-status');
+  box.textContent = message;
+  box.hidden = false;
+  box.classList.toggle('is-error', !!isError);
+  box.classList.toggle('is-success', !!isSuccess);
+}
+
+// ---------------- File table ----------------
+
+function renderFileTable() {
+  const tbody = el('file-table-body');
+  tbody.innerHTML = '';
+  el('empty-state').hidden = state.files.length > 0;
+  el('file-table').hidden = state.files.length === 0;
+
+  let missingFromGcs = 0;
+  let notIngested = 0;
+  let notTested = 0;
+
+  for (const file of state.files) {
+    const { inDrive, inGcs, ingested, tested } = fileStage(file);
+    if (inDrive && !inGcs) missingFromGcs++;
+    if (inGcs && !ingested) notIngested++;
+    if (ingested && !tested) notTested++;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="file-name">${escapeHtml(file.file_name)}</td>
+      <td>${pipelineHtml(inDrive, inGcs, ingested, tested)}</td>
+      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing')}</td>
+      <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing')}</td>
+      <td></td>
+      <td></td>
+    `;
+    const ingestedCell = tr.children[4];
+    const testedCell = tr.children[5];
+    ingestedCell.appendChild(toggleButton(ingested, 'Ingested', () => toggleStatus(file, 'ingested', !ingested)));
+    testedCell.appendChild(toggleButton(tested, 'Tested', () => toggleStatus(file, 'tested', !tested), !ingested));
+    tbody.appendChild(tr);
+  }
+
+  renderStats(state.files.length, missingFromGcs, notIngested, notTested);
+}
+
+function pipelineHtml(inDrive, inGcs, ingested, tested) {
+  const seg = (on, isGapCandidate) => {
+    const cls = on ? 'is-on' : isGapCandidate ? 'is-gap' : '';
+    return `<span class="pipe-seg ${cls}"></span>`;
+  };
+  return `<span class="pipeline">
+    ${seg(inDrive, false)}
+    ${seg(inGcs, inDrive && !inGcs)}
+    ${seg(ingested, inGcs && !ingested)}
+    ${seg(tested, ingested && !tested)}
+  </span>`;
+}
+
+function pillHtml(on, label) {
+  return `<span class="status-pill ${on ? 'is-on' : ''}"><span class="status-dot"></span>${label}</span>`;
+}
+
+function toggleButton(on, label, onClick, disabled) {
+  const btn = document.createElement('button');
+  btn.className = 'status-toggle' + (on ? ' is-on' : '');
+  btn.innerHTML = `<span class="status-toggle-check"></span>${label}`;
+  btn.disabled = !!disabled;
+  btn.title = disabled ? 'Mark ingested first' : '';
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+async function toggleStatus(file, stage, on) {
+  const email = state.session?.user?.email || null;
+  try {
+    const updated = await setFileStatus(file.id, stage, on, email);
+    const idx = state.files.findIndex((f) => f.id === file.id);
+    if (idx !== -1) state.files[idx] = updated;
+    renderFileTable();
+  } catch (err) {
+    showSyncStatus(err.message || 'Could not update status.', true);
+  }
+}
+
+function renderStats(total, missingFromGcs, notIngested, notTested) {
+  const row = el('stat-row');
+  const stat = (num, label, flagged) => `
+    <div class="stat${flagged && num > 0 ? ' is-flagged' : ''}">
+      <div class="stat-num mono">${num}</div>
+      <div class="stat-label">${label}</div>
+    </div>`;
+  row.innerHTML =
+    stat(total, 'files tracked', false) +
+    stat(missingFromGcs, 'in Drive, missing from GCS', true) +
+    stat(notIngested, 'in GCS, not ingested', true) +
+    stat(notTested, 'ingested, not tested', true);
+}
+
+// ---------------- Add / edit project dialog ----------------
+
+el('btn-add-project').addEventListener('click', () => openProjectDialog(null));
+el('btn-edit-project').addEventListener('click', () => {
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  if (project) openProjectDialog(project);
+});
+el('btn-cancel-dialog').addEventListener('click', () => el('project-dialog').close());
+
+function openProjectDialog(project) {
+  state.editingProjectId = project?.id || null;
+  el('dialog-title').textContent = project ? 'Edit project' : 'Add project';
+  el('f-display-name').value = project?.display_name || '';
+  el('f-slug').value = project?.slug || '';
+  el('f-slug').disabled = !!project; // slug is immutable once created
+  el('f-drive-folder').value = project?.drive_folder_id || '';
+  el('f-gcs-bucket').value = project?.gcs_bucket_name || '';
+  el('f-gcp-project').value = project?.gcp_project_id || '';
+  el('f-notes').value = project?.notes || '';
+  el('project-dialog').showModal();
+}
+
+el('project-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fields = {
+    display_name: el('f-display-name').value.trim(),
+    drive_folder_id: el('f-drive-folder').value.trim() || null,
+    gcs_bucket_name: el('f-gcs-bucket').value.trim(),
+    gcp_project_id: el('f-gcp-project').value.trim() || null,
+    notes: el('f-notes').value.trim() || null,
+  };
+
+  try {
+    if (state.editingProjectId) {
+      await updateProject(state.editingProjectId, fields);
+    } else {
+      await addProject({ ...fields, slug: el('f-slug').value.trim() });
+    }
+    el('project-dialog').close();
+    const keepId = state.editingProjectId || null;
+    await refreshProjects();
+    if (keepId) selectProject(keepId);
+  } catch (err) {
+    alert(err.message || 'Could not save project.');
+  }
+});
+
+// ---------------- Utils ----------------
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+init();
