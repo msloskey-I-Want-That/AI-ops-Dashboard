@@ -298,7 +298,6 @@ function openProjectDialog(project) {
   el('dialog-title').textContent = project ? 'Edit project' : 'Add project';
   el('f-display-name').value = project?.display_name || '';
   el('f-slug').value = project?.slug || '';
-  el('f-slug').disabled = !!project; // slug is immutable once created
   el('f-drive-folder').value = project?.drive_folder_id || '';
   el('f-gcs-bucket').value = project?.gcs_bucket_name || '';
   el('f-gcp-project').value = project?.gcp_project_id || '';
@@ -309,6 +308,7 @@ function openProjectDialog(project) {
 el('project-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fields = {
+    slug: el('f-slug').value.trim(),
     display_name: el('f-display-name').value.trim(),
     drive_folder_id: el('f-drive-folder').value.trim() || null,
     gcs_bucket_name: el('f-gcs-bucket').value.trim(),
@@ -320,7 +320,7 @@ el('project-form').addEventListener('submit', async (e) => {
     if (state.editingProjectId) {
       await updateProject(state.editingProjectId, fields);
     } else {
-      await addProject({ ...fields, slug: el('f-slug').value.trim() });
+      await addProject(fields);
     }
     el('project-dialog').close();
     const keepId = state.editingProjectId || null;
