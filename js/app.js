@@ -43,9 +43,41 @@ onAuthChange((_event, session) => {
 });
 
 async function init() {
-  state.session = await getSession();
+  checkForAuthErrorInUrl();
+  try {
+    state.session = await getSession();
+  } catch (err) {
+    console.error('getSession failed:', err);
+    el('auth-error').textContent = `Session check failed: ${err.message || err}`;
+    el('auth-error').hidden = false;
+  }
   renderAuthState();
-  if (state.session) await bootApp();
+  if (state.session) {
+    try {
+      await bootApp();
+    } catch (err) {
+      console.error('bootApp failed:', err);
+      el('no-project-state').hidden = false;
+      el('no-project-state').innerHTML = `<p style="color:var(--danger)">Failed to load projects: ${escapeHtml(err.message || String(err))}</p><p class="empty-state-sub">Check the browser console for details.</p>`;
+    }
+  }
+}
+
+// Supabase appends ?error=...&error_description=... (or in the hash) to the
+// redirect URL when the OAuth exchange fails, instead of throwing in JS.
+// Surface it so failures aren't silent.
+function checkForAuthErrorInUrl() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const queryParams = new URLSearchParams(window.location.search);
+  const error = hashParams.get('error') || queryParams.get('error');
+  const description =
+    hashParams.get('error_description') || queryParams.get('error_description') || '';
+  if (error) {
+    el('auth-error').textContent = `${error}${description ? `: ${decodeURIComponent(description.replace(/\+/g, ' '))}` : ''}`;
+    el('auth-error').hidden = false;
+    // Clean the error out of the URL so a refresh doesn't keep showing it.
+    window.history.replaceState({}, '', window.location.pathname);
+  }
 }
 
 function renderAuthState() {
