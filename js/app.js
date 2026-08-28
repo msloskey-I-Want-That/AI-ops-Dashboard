@@ -161,21 +161,23 @@ async function renderOverview() {
       acc.notIngested += Number(r.not_ingested);
       acc.notTested += Number(r.not_tested);
       acc.tested += Number(r.fully_tested);
+      acc.bytes += Number(r.total_bytes);
       return acc;
     },
-    { total: 0, missing: 0, notIngested: 0, notTested: 0, tested: 0 }
+    { total: 0, missing: 0, notIngested: 0, notTested: 0, tested: 0, bytes: 0 }
   );
 
-  const kpi = (label, num, color) => `
+  const kpi = (label, value, color) => `
     <div class="kpi-card">
       <p class="kpi-label">${escapeHtml(label)}</p>
-      <p class="kpi-num mono"${color ? ` style="color:${color}"` : ''}>${num.toLocaleString()}</p>
+      <p class="kpi-num mono"${color ? ` style="color:${color}"` : ''}>${value}</p>
     </div>`;
   kpiRow.innerHTML =
-    kpi('Files tracked', totals.total) +
-    kpi('Fully tested', totals.tested, 'var(--stage-tested)') +
-    kpi('Queued for ingestion', totals.notIngested, 'var(--stage-not-ingested)') +
-    kpi('Needs Drive → GCS copy', totals.missing, 'var(--stage-missing)');
+    kpi('Files tracked', totals.total.toLocaleString()) +
+    kpi('Total data volume', formatBytes(totals.bytes)) +
+    kpi('Fully tested', totals.tested.toLocaleString(), 'var(--stage-tested)') +
+    kpi('Queued for ingestion', totals.notIngested.toLocaleString(), 'var(--stage-not-ingested)') +
+    kpi('Needs Drive → GCS copy', totals.missing.toLocaleString(), 'var(--stage-missing)');
 
   note.textContent = notSynced.length
     ? `Not yet synced: ${notSynced.map((r) => r.display_name).join(', ')}.`
@@ -187,7 +189,7 @@ async function renderOverview() {
 
   const ctx = document.getElementById('overview-chart');
   const chartData = {
-    labels: sorted.map((r) => r.display_name),
+    labels: sorted.map((r) => `${r.display_name} (${formatBytes(r.total_bytes)})`),
     datasets: [
       { label: 'Missing from GCS', data: sorted.map((r) => Number(r.missing_from_gcs)), backgroundColor: '#ff6b6a', stack: 's' },
       { label: 'Not yet ingested', data: sorted.map((r) => Number(r.not_ingested)), backgroundColor: '#ff9552', stack: 's' },
@@ -357,6 +359,7 @@ function renderFileTable() {
   let missingFromGcs = 0;
   let notIngested = 0;
   let notTested = 0;
+  let totalBytes = 0;
 
   // Stats always reflect the whole project, regardless of the active filter.
   for (const file of state.files) {
@@ -364,6 +367,7 @@ function renderFileTable() {
     if (inDrive && !inGcs) missingFromGcs++;
     if (inGcs && !ingested) notIngested++;
     if (ingested && !tested) notTested++;
+    totalBytes += Number(file.gcs_size_bytes) || 0;
   }
 
   for (const file of visible) {
@@ -399,7 +403,7 @@ function renderFileTable() {
     tbody.appendChild(tr);
   }
 
-  renderStats(state.files.length, missingFromGcs, notIngested, notTested);
+  renderStats(state.files.length, missingFromGcs, notIngested, notTested, totalBytes);
   renderFilterBar();
   renderBulkBar();
   syncCheckAllState();
@@ -543,14 +547,14 @@ async function toggleStatus(file, stage, on) {
   }
 }
 
-function renderStats(total, missingFromGcs, notIngested, notTested) {
+function renderStats(total, missingFromGcs, notIngested, notTested, totalBytes) {
   const row = el('stat-row');
   row.innerHTML = '';
 
-  const makeStat = (num, label, flagged, filterKey) => {
+  const makeStat = (num, label, flagged, filterKey, displayValue) => {
     const btn = document.createElement('button');
     btn.className = 'stat' + (flagged && num > 0 ? ' is-flagged' : '') + (state.activeFilter === filterKey ? ' is-selected' : '');
-    btn.innerHTML = `<div class="stat-num mono">${num}</div><div class="stat-label">${label}</div>`;
+    btn.innerHTML = `<div class="stat-num mono">${displayValue ?? num}</div><div class="stat-label">${label}</div>`;
     btn.addEventListener('click', () => {
       if (!filterKey || num === 0) return;
       state.activeFilter = state.activeFilter === filterKey ? null : filterKey;
@@ -562,6 +566,7 @@ function renderStats(total, missingFromGcs, notIngested, notTested) {
   };
 
   row.appendChild(makeStat(total, 'files tracked', false, null));
+  row.appendChild(makeStat(0, 'total size', false, null, formatBytes(totalBytes)));
   row.appendChild(makeStat(missingFromGcs, 'in Drive, missing from GCS', true, 'missingFromGcs'));
   row.appendChild(makeStat(notIngested, 'in GCS, not ingested', true, 'notIngested'));
   row.appendChild(makeStat(notTested, 'ingested, not tested', true, 'notTested'));
@@ -620,6 +625,15 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str ?? '';
   return div.innerHTML;
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  const value = n / Math.pow(1024, i);
+  return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`;
 }
 
 init();
