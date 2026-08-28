@@ -10,10 +10,13 @@ Tracks the pipeline for each data project: **Drive (shared folder) → GCS bucke
 
 - Drive folder contents and GCS bucket contents are listed **live**, client-side, using your own Google
   sign-in (read-only scopes: `drive.readonly`, `devstorage.read_only`). No service account keys are
-  embedded in the app.
+  embedded in the app. Drive folders are walked **recursively** — subfolders are traversed, not
+  treated as files — and each file's tracked name is its path relative to the project's root folder
+  (e.g. `Files/LEVO/02. February/statement.xlsx`), matching how the corresponding GCS objects are
+  already named after a folder-structured upload.
 - Ingested/tested status is stored in Supabase — these are steps you perform yourself (running the
   ingestion script, testing it), so the app just lets you check them off per file.
-- Each file's status is reconciled by filename across all three stages, with clear flags for files
+- Each file's status is reconciled by relative path across all three stages, with clear flags for files
   that are stuck at a stage (e.g. copied to Drive but never made it to GCS).
 
 ## Architecture
@@ -32,9 +35,10 @@ Tracks the pipeline for each data project: **Drive (shared folder) → GCS bucke
 
 ## Known limitations / future improvements
 
-- Sync matches Drive files to GCS objects **by filename**. If a file gets renamed between stages,
-  it'll show as two separate rows.
-- Sync only looks one level deep in each Drive folder (no subfolder recursion).
+- Sync matches Drive files to GCS objects **by relative path** (folder structure
+  included, e.g. `Files/LEVO/02. February/statement.xlsx`). If a file gets
+  renamed or moved to a different folder between stages, it'll show as two
+  separate rows.
 - A file that disappears from Drive or GCS between syncs still shows its last-known state — there's
   no "removed" detection yet.
 - `Accounts & Budget` and `SOP Compliance` modules are scaffolded in the nav but not yet built.
