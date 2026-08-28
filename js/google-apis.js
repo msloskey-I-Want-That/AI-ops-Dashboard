@@ -92,7 +92,9 @@ async function googleApiError(res, apiName) {
     // ignore parse failure, fall back to status text
   }
   if (res.status === 401) {
-    return new Error(`${apiName}: your Google session expired — sign in again to refresh it.`);
+    const err = new Error(`${apiName}: your Google session expired — sign in again to refresh it.`);
+    err.isGoogleAuthError = true;
+    return err;
   }
   if (res.status === 403) {
     return new Error(`${apiName}: access denied${detail ? ` (${detail})` : ''}. Check you have permission on this resource.`);

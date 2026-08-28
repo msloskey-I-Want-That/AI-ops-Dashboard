@@ -1,5 +1,5 @@
 import { supabase } from './supabase-client.js';
-import { signInWithGoogle, signOut, getSession, onAuthChange, getCachedGoogleToken } from './auth.js';
+import { signInWithGoogle, signOut, getSession, onAuthChange, getCachedGoogleToken, clearGoogleToken } from './auth.js';
 import {
   loadProjects,
   loadFiles,
@@ -298,7 +298,12 @@ el('btn-sync').addEventListener('click', async () => {
     renderFileTable();
     showSyncStatus(`Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.`, false, true);
   } catch (err) {
-    showSyncStatus(err.message || 'Sync failed.', true);
+    if (err.isGoogleAuthError) {
+      clearGoogleToken();
+      showSyncStatusWithAction(err.message + ' ', 'Reconnect Google', () => signInWithGoogle());
+    } else {
+      showSyncStatus(err.message || 'Sync failed.', true);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Sync now';
