@@ -128,6 +128,7 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
     document.querySelectorAll('.view').forEach((v) => (v.hidden = true));
     el(`view-${view}`).hidden = false;
     if (view === 'overview') renderOverview();
+    if (view === 'filetypes') initFiletypesView();
   });
 });
 
@@ -389,7 +390,105 @@ function showSyncStatusWithAction(message, actionLabel, onAction) {
   box.appendChild(btn);
 }
 
-// ---------------- File table ----------------
+// ---------------- File Types ----------------
+
+let filetypesState = { activeProjectId: null, files: [], activeType: null };
+
+function getFileExtension(fileName) {
+  const base = fileName.split('/').pop() || fileName;
+  const idx = base.lastIndexOf('.');
+  if (idx <= 0) return 'no extension';
+  return base.slice(idx + 1).toLowerCase();
+}
+
+async function initFiletypesView() {
+  renderFiletypesProjectBar();
+  if (!filetypesState.activeProjectId && state.projects.length > 0) {
+    await selectFiletypesProject(state.projects[0].id);
+  } else if (filetypesState.activeProjectId) {
+    await selectFiletypesProject(filetypesState.activeProjectId);
+  }
+}
+
+function renderFiletypesProjectBar() {
+  const bar = el('filetypes-project-bar');
+  bar.innerHTML = '';
+  for (const p of state.projects) {
+    const chip = document.createElement('button');
+    chip.className = 'project-chip' + (p.id === filetypesState.activeProjectId ? ' is-active' : '');
+    chip.textContent = p.display_name;
+    chip.addEventListener('click', () => selectFiletypesProject(p.id));
+    bar.appendChild(chip);
+  }
+}
+
+async function selectFiletypesProject(projectId) {
+  filetypesState.activeProjectId = projectId;
+  filetypesState.activeType = null;
+  renderFiletypesProjectBar();
+  el('filetypes-empty').hidden = true;
+  el('filetypes-panel').hidden = false;
+  filetypesState.files = await loadFiles(projectId);
+  renderFiletypesTypeChips();
+  renderFiletypesTable();
+}
+
+function renderFiletypesTypeChips() {
+  const counts = new Map();
+  for (const f of filetypesState.files) {
+    const ext = getFileExtension(f.file_name);
+    counts.set(ext, (counts.get(ext) || 0) + 1);
+  }
+  const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+
+  const row = el('type-chip-row');
+  row.innerHTML = '';
+  const allChip = document.createElement('button');
+  allChip.className = 'project-chip' + (filetypesState.activeType === null ? ' is-active' : '');
+  allChip.textContent = `All (${filetypesState.files.length})`;
+  allChip.addEventListener('click', () => {
+    filetypesState.activeType = null;
+    renderFiletypesTypeChips();
+    renderFiletypesTable();
+  });
+  row.appendChild(allChip);
+
+  for (const [ext, count] of sorted) {
+    const chip = document.createElement('button');
+    chip.className = 'project-chip' + (filetypesState.activeType === ext ? ' is-active' : '');
+    chip.textContent = `.${ext} (${count})`;
+    chip.addEventListener('click', () => {
+      filetypesState.activeType = filetypesState.activeType === ext ? null : ext;
+      renderFiletypesTypeChips();
+      renderFiletypesTable();
+    });
+    row.appendChild(chip);
+  }
+}
+
+function renderFiletypesTable() {
+  const tbody = el('filetypes-table-body');
+  tbody.innerHTML = '';
+  const visible =
+    filetypesState.activeType === null
+      ? filetypesState.files
+      : filetypesState.files.filter((f) => getFileExtension(f.file_name) === filetypesState.activeType);
+
+  for (const file of visible) {
+    const { inDrive, inGcs, ingested, tested } = fileStage(file);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="file-name">${escapeHtml(file.file_name)}</td>
+      <td class="mono">${escapeHtml(getFileExtension(file.file_name))}</td>
+      <td class="mono">${formatBytes(file.gcs_size_bytes)}</td>
+      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing')}</td>
+      <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing')}</td>
+      <td>${pillHtml(ingested, ingested ? 'yes' : 'no')}</td>
+      <td>${pillHtml(tested, tested ? 'yes' : 'no')}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
 
 function renderFileTable() {
   const tbody = el('file-table-body');

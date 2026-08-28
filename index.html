@@ -60,6 +60,9 @@
           <button class="nav-item" data-view="ingestion">
             <span class="nav-dot"></span> Ingestion Tracker
           </button>
+          <button class="nav-item" data-view="filetypes">
+            <span class="nav-dot"></span> File Types
+          </button>
           <button class="nav-item" data-view="accounts" disabled>
             <span class="nav-dot nav-dot-muted"></span> Accounts &amp; Budget
             <span class="nav-badge">soon</span>
@@ -189,6 +192,43 @@
         <div id="no-project-state" class="empty-state" hidden>
           <p>No project selected.</p>
           <p class="empty-state-sub">Add a project or pick one above to see its ingestion status.</p>
+        </div>
+      </section>
+
+      <!-- File Types view -->
+      <section id="view-filetypes" class="view" hidden>
+        <header class="view-header">
+          <div>
+            <h1>File Types</h1>
+            <p class="view-sub">Every file type tracked, broken out individually, per project.</p>
+          </div>
+        </header>
+
+        <div class="project-bar" id="filetypes-project-bar"></div>
+
+        <div id="filetypes-panel" hidden>
+          <div class="project-bar" id="type-chip-row"></div>
+          <div class="table-wrap">
+            <table class="file-table" id="filetypes-table">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Type</th>
+                  <th>Size</th>
+                  <th>Drive</th>
+                  <th>GCS</th>
+                  <th>Ingested</th>
+                  <th>Tested</th>
+                </tr>
+              </thead>
+              <tbody id="filetypes-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="filetypes-empty" class="empty-state" hidden>
+          <p>No project selected.</p>
+          <p class="empty-state-sub">Pick a project above to see its file types.</p>
         </div>
       </section>
 
