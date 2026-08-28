@@ -403,10 +403,26 @@ function getFileExtension(fileName) {
 
 async function initFiletypesView() {
   renderFiletypesProjectBar();
-  if (!filetypesState.activeProjectId && state.projects.length > 0) {
-    await selectFiletypesProject(state.projects[0].id);
-  } else if (filetypesState.activeProjectId) {
-    await selectFiletypesProject(filetypesState.activeProjectId);
+  el('filetypes-empty').hidden = true;
+  el('filetypes-panel').hidden = true;
+
+  if (state.projects.length === 0) {
+    el('filetypes-empty').hidden = false;
+    el('filetypes-empty').innerHTML = '<p>No projects yet.</p><p class="empty-state-sub">Add a project in Ingestion Tracker first.</p>';
+    return;
+  }
+
+  try {
+    if (filetypesState.activeProjectId) {
+      await selectFiletypesProject(filetypesState.activeProjectId);
+    } else {
+      await selectFiletypesProject(state.projects[0].id);
+    }
+  } catch (err) {
+    console.error('initFiletypesView failed:', err);
+    el('filetypes-empty').hidden = false;
+    el('filetypes-panel').hidden = true;
+    el('filetypes-empty').innerHTML = `<p style="color:var(--danger)">Failed to load: ${escapeHtml(err.message || String(err))}</p><p class="empty-state-sub">Check the browser console for details.</p>`;
   }
 }
 
@@ -428,7 +444,15 @@ async function selectFiletypesProject(projectId) {
   renderFiletypesProjectBar();
   el('filetypes-empty').hidden = true;
   el('filetypes-panel').hidden = false;
-  filetypesState.files = await loadFiles(projectId);
+  try {
+    filetypesState.files = await loadFiles(projectId);
+  } catch (err) {
+    console.error('selectFiletypesProject failed:', err);
+    el('filetypes-panel').hidden = true;
+    el('filetypes-empty').hidden = false;
+    el('filetypes-empty').innerHTML = `<p style="color:var(--danger)">Failed to load files: ${escapeHtml(err.message || String(err))}</p>`;
+    return;
+  }
   renderFiletypesTypeChips();
   renderFiletypesTable();
 }
