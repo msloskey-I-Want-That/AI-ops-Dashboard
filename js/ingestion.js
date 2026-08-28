@@ -10,14 +10,28 @@ export async function loadProjects() {
   return data;
 }
 
+// Supabase caps a single response at ~1000 rows (same limit that required
+// batching the sync upsert), so reading back a project with more files than
+// that needs pagination too, or only the first 1000 (alphabetically) ever
+// show up regardless of how many actually got synced.
+const SELECT_PAGE_SIZE = 1000;
+
 export async function loadFiles(projectId) {
-  const { data, error } = await supabase
-    .from('ingestion_files')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('file_name', { ascending: true });
-  if (error) throw error;
-  return data;
+  const allRows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('ingestion_files')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('file_name', { ascending: true })
+      .range(from, from + SELECT_PAGE_SIZE - 1);
+    if (error) throw error;
+    allRows.push(...data);
+    if (data.length < SELECT_PAGE_SIZE) break;
+    from += SELECT_PAGE_SIZE;
+  }
+  return allRows;
 }
 
 export async function addProject({ slug, display_name, drive_folder_id, gcs_bucket_name, gcp_project_id, notes }) {
