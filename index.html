@@ -104,10 +104,20 @@
 
           <div class="stat-row" id="stat-row"></div>
 
+          <div id="bulk-bar" class="bulk-bar" hidden>
+            <span id="bulk-count" class="bulk-count">0 selected</span>
+            <div class="bulk-actions">
+              <button id="btn-bulk-ingested" class="btn btn-secondary btn-sm">Mark ingested</button>
+              <button id="btn-bulk-tested" class="btn btn-secondary btn-sm">Mark tested</button>
+              <button id="btn-bulk-clear" class="btn btn-ghost btn-sm">Clear selection</button>
+            </div>
+          </div>
+
           <div class="table-wrap">
             <table class="file-table" id="file-table">
               <thead>
                 <tr>
+                  <th class="col-check"><input type="checkbox" id="check-all" /></th>
                   <th>File</th>
                   <th>Pipeline</th>
                   <th>Drive</th>

@@ -52,6 +52,20 @@ export async function setFileStatus(fileId, stage, on, userEmail) {
   return data;
 }
 
+// Bulk version — one Supabase call for any number of files, for clearing a
+// historical backlog (e.g. 1000 pre-existing files) instead of toggling one
+// at a time.
+export async function bulkSetFileStatus(fileIds, stage, on, userEmail) {
+  if (fileIds.length === 0) return [];
+  const fields =
+    stage === 'ingested'
+      ? { ingested_at: on ? new Date().toISOString() : null, ingested_by: on ? userEmail : null }
+      : { tested_at: on ? new Date().toISOString() : null, tested_by: on ? userEmail : null };
+  const { data, error } = await supabase.from('ingestion_files').update(fields).in('id', fileIds).select();
+  if (error) throw error;
+  return data;
+}
+
 export async function updateFileNotes(fileId, notes) {
   const { error } = await supabase.from('ingestion_files').update({ notes }).eq('id', fileId);
   if (error) throw error;

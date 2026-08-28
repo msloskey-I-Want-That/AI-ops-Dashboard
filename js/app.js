@@ -6,6 +6,7 @@ import {
   addProject,
   updateProject,
   setFileStatus,
+  bulkSetFileStatus,
   syncProject,
   fileStage,
 } from './ingestion.js';
@@ -18,6 +19,7 @@ let state = {
   activeProjectId: null,
   files: [],
   editingProjectId: null, // set when the dialog is open in "edit" mode
+  selectedFileIds: new Set(),
 };
 
 // ---------------- Auth wiring ----------------
@@ -148,6 +150,7 @@ async function selectProject(projectId) {
     (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '');
 
   state.files = await loadFiles(projectId);
+  state.selectedFileIds = new Set();
   renderFileTable();
 }
 
@@ -176,6 +179,7 @@ el('btn-sync').addEventListener('click', async () => {
   try {
     const result = await syncProject(project, token);
     state.files = await loadFiles(project.id);
+    state.selectedFileIds = new Set();
     renderFileTable();
     showSyncStatus(`Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.`, false, true);
   } catch (err) {
@@ -214,6 +218,7 @@ function renderFileTable() {
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td></td>
       <td class="file-name">${escapeHtml(file.file_name)}</td>
       <td>${pipelineHtml(inDrive, inGcs, ingested, tested)}</td>
       <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing')}</td>
@@ -221,14 +226,91 @@ function renderFileTable() {
       <td></td>
       <td></td>
     `;
-    const ingestedCell = tr.children[4];
-    const testedCell = tr.children[5];
+    const checkCell = tr.children[0];
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'row-check';
+    checkbox.checked = state.selectedFileIds.has(file.id);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) state.selectedFileIds.add(file.id);
+      else state.selectedFileIds.delete(file.id);
+      renderBulkBar();
+      syncCheckAllState();
+    });
+    checkCell.appendChild(checkbox);
+
+    const ingestedCell = tr.children[5];
+    const testedCell = tr.children[6];
     ingestedCell.appendChild(toggleButton(ingested, 'Ingested', () => toggleStatus(file, 'ingested', !ingested)));
     testedCell.appendChild(toggleButton(tested, 'Tested', () => toggleStatus(file, 'tested', !tested), !ingested));
     tbody.appendChild(tr);
   }
 
   renderStats(state.files.length, missingFromGcs, notIngested, notTested);
+  renderBulkBar();
+  syncCheckAllState();
+}
+
+function syncCheckAllState() {
+  const checkAll = el('check-all');
+  const total = state.files.length;
+  const selected = state.selectedFileIds.size;
+  checkAll.checked = total > 0 && selected === total;
+  checkAll.indeterminate = selected > 0 && selected < total;
+}
+
+function renderBulkBar() {
+  const count = state.selectedFileIds.size;
+  el('bulk-bar').hidden = count === 0;
+  el('bulk-count').textContent = `${count} selected`;
+}
+
+el('check-all').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    state.selectedFileIds = new Set(state.files.map((f) => f.id));
+  } else {
+    state.selectedFileIds = new Set();
+  }
+  renderFileTable();
+});
+
+el('btn-bulk-clear').addEventListener('click', () => {
+  state.selectedFileIds = new Set();
+  renderFileTable();
+});
+
+el('btn-bulk-ingested').addEventListener('click', () => bulkApply('ingested'));
+el('btn-bulk-tested').addEventListener('click', () => bulkApply('tested'));
+
+async function bulkApply(stage) {
+  const ids = Array.from(state.selectedFileIds);
+  if (ids.length === 0) return;
+  const email = state.session?.user?.email || null;
+  const btn = stage === 'ingested' ? el('btn-bulk-ingested') : el('btn-bulk-tested');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Applying…';
+  try {
+    let updated;
+    if (stage === 'tested') {
+      // Tested implies ingested — stamp both so the pipeline stays consistent,
+      // same rule the individual per-row toggle enforces.
+      await bulkSetFileStatus(ids, 'ingested', true, email);
+      updated = await bulkSetFileStatus(ids, 'tested', true, email);
+    } else {
+      updated = await bulkSetFileStatus(ids, 'ingested', true, email);
+    }
+    const byId = new Map(updated.map((f) => [f.id, f]));
+    state.files = state.files.map((f) => byId.get(f.id) || f);
+    state.selectedFileIds = new Set();
+    renderFileTable();
+    showSyncStatus(`Marked ${ids.length} file(s) as ${stage}.`, false, true);
+  } catch (err) {
+    showSyncStatus(err.message || `Could not mark files as ${stage}.`, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 function pipelineHtml(inDrive, inGcs, ingested, tested) {

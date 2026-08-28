@@ -299,6 +299,29 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
 .stat.is-flagged { border-color: rgba(255, 149, 82, 0.35); background: var(--accent-orange-soft); }
 .stat.is-flagged .stat-num { color: var(--accent-orange); }
 
+/* ---------- Bulk action bar ---------- */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--accent-lime-soft);
+  border: 1px solid rgba(195, 245, 58, 0.35);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  margin-bottom: 14px;
+}
+.bulk-count { font-size: 13px; font-weight: 600; color: var(--accent-lime); }
+.bulk-actions { display: flex; gap: 8px; }
+.col-check { width: 36px; }
+.file-table td:first-child, .file-table th:first-child { padding-right: 4px; }
+input[type="checkbox"].row-check, #check-all {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-lime);
+  cursor: pointer;
+}
+
 /* ---------- File table ---------- */
 .table-wrap {
   border: 1px solid var(--glass-border);
