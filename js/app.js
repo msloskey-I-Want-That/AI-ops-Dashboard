@@ -177,7 +177,9 @@ el('btn-sync').addEventListener('click', async () => {
   showSyncStatus('Pulling current state from Drive and Cloud Storage…', false);
 
   try {
-    const result = await syncProject(project, token);
+    const result = await syncProject(project, token, (done, total) => {
+      if (total > 500) showSyncStatus(`Saving ${done}/${total} file records…`, false);
+    });
     state.files = await loadFiles(project.id);
     state.selectedFileIds = new Set();
     renderFileTable();

@@ -88,7 +88,7 @@ export async function updateFileNotes(fileId, notes) {
 // Pulls live Drive + GCS listings for a project and reconciles them into
 // ingestion_files. Matches Drive files to GCS objects by filename. Existing
 // manual status (ingested_at/tested_at) on a file is left untouched.
-export async function syncProject(project, googleAccessToken) {
+export async function syncProject(project, googleAccessToken, onProgress) {
   const [driveFiles, gcsObjects] = await Promise.all([
     project.drive_folder_id ? listDriveFiles(project.drive_folder_id, googleAccessToken) : Promise.resolve([]),
     project.gcs_bucket_name ? listGcsObjects(project.gcs_bucket_name, googleAccessToken) : Promise.resolve([]),
@@ -118,10 +118,17 @@ export async function syncProject(project, googleAccessToken) {
   const rows = Array.from(byName.values()).map((r) => ({ ...r, project_id: project.id }));
   if (rows.length === 0) return { driveCount: 0, gcsCount: 0 };
 
-  const { error } = await supabase
-    .from('ingestion_files')
-    .upsert(rows, { onConflict: 'project_id,file_name' });
-  if (error) throw error;
+  // Supabase caps a single write at ~1000 rows and silently truncates rather
+  // than erroring, so large projects (thousands of GCS objects) need batching.
+  const SYNC_CHUNK_SIZE = 500;
+  for (let i = 0; i < rows.length; i += SYNC_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + SYNC_CHUNK_SIZE);
+    const { error } = await supabase
+      .from('ingestion_files')
+      .upsert(chunk, { onConflict: 'project_id,file_name' });
+    if (error) throw error;
+    if (onProgress) onProgress(Math.min(i + SYNC_CHUNK_SIZE, rows.length), rows.length);
+  }
 
   return { driveCount: driveFiles.length, gcsCount: gcsObjects.length };
 }
