@@ -10,6 +10,7 @@ import {
   syncProject,
   fileStage,
   loadProgressOverview,
+  verifyIngestion,
 } from './ingestion.js';
 
 const el = (id) => document.getElementById(id);
@@ -356,6 +357,41 @@ el('btn-sync').addEventListener('click', async () => {
   }
 });
 
+el('btn-verify').addEventListener('click', async () => {
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  if (!project) return;
+
+  if (!project.verify_supabase_url) {
+    showSyncStatus('No verification database configured for this project yet.', true);
+    return;
+  }
+
+  const btn = el('btn-verify');
+  btn.disabled = true;
+  btn.textContent = 'Verifying…';
+  showSyncStatus('Checking against the case database…', false);
+
+  try {
+    const result = await verifyIngestion(project, (count) => {
+      showSyncStatus(`Checking against the case database — ${count} record(s) read so far…`, false);
+    });
+    state.files = await loadFiles(project.id);
+    state.selectedFileIds = new Set();
+    state.activeFilter = null;
+    renderFileTable();
+    showSyncStatus(
+      `Verified against ${result.externalRecords} case-database record(s) — ${result.externalVerified} marked ingested there, ${result.newlyVerified} newly confirmed here.`,
+      false,
+      true
+    );
+  } catch (err) {
+    showSyncStatus(err.message || 'Verification failed.', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Verify ingestion';
+  }
+});
+
 function showSyncStatus(message, isError, isSuccess) {
   const box = el('sync-status');
   box.innerHTML = '';
@@ -565,6 +601,13 @@ function renderFileTable() {
     const ingestedCell = tr.children[5];
     const testedCell = tr.children[6];
     ingestedCell.appendChild(toggleButton(ingested, 'Ingested', () => toggleStatus(file, 'ingested', !ingested)));
+    if (file.verified_ingested_at) {
+      const badge = document.createElement('span');
+      badge.className = 'verified-badge';
+      badge.title = `Confirmed in the case database as of ${new Date(file.verified_ingested_at).toLocaleString()}`;
+      badge.textContent = '✓ verified';
+      ingestedCell.appendChild(badge);
+    }
     testedCell.appendChild(toggleButton(tested, 'Tested', () => toggleStatus(file, 'tested', !tested), !ingested));
     tbody.appendChild(tr);
   }

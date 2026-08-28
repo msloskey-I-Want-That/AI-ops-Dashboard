@@ -1,4 +1,5 @@
 import { supabase } from './supabase-client.js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { listDriveFiles, listGcsObjects } from './google-apis.js';
 
 export async function loadProjects() {
@@ -163,4 +164,66 @@ export async function loadProgressOverview() {
   const { data, error } = await supabase.rpc('get_ingestion_progress');
   if (error) throw error;
   return data;
+}
+
+// Verifies ingestion against the project's own external case database
+// (its real ingestion pipeline's Supabase project), rather than relying on
+// the manual ingested_at/ingested_by self-report. Matches by GCS path —
+// this project's own gcs_object_name against the external table's path
+// column, with that table's bucket-name prefix stripped off first, since
+// our tracked names don't include the bucket name.
+export async function verifyIngestion(project, onProgress) {
+  if (!project.verify_supabase_url || !project.verify_supabase_anon_key) {
+    throw new Error('No verification database configured for this project.');
+  }
+
+  const externalClient = createClient(project.verify_supabase_url, project.verify_supabase_anon_key);
+  const table = project.verify_table || 'documents';
+  const pathCol = project.verify_path_column || 'gcs_archive_path';
+  const statusCol = project.verify_status_column || 'ingestion_status';
+  const successValue = project.verify_success_value || 'indexed';
+  const prefix = `${project.gcs_bucket_name}/`;
+
+  // Pull every row's path + status from the external table, paginated the
+  // same way our own reads are (same underlying Supabase row cap applies).
+  const PAGE_SIZE = 1000;
+  const externalRows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await externalClient
+      .from(table)
+      .select(`${pathCol}, ${statusCol}`)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`External database error: ${error.message}`);
+    externalRows.push(...data);
+    if (onProgress) onProgress(externalRows.length);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  const verifiedPaths = new Set(
+    externalRows
+      .filter((r) => r[statusCol] === successValue)
+      .map((r) => (r[pathCol] || '').startsWith(prefix) ? r[pathCol].slice(prefix.length) : r[pathCol])
+  );
+
+  const files = await loadFiles(project.id);
+  const now = new Date().toISOString();
+  const toVerify = files.filter((f) => verifiedPaths.has(f.file_name) && !f.verified_ingested_at);
+
+  const UPDATE_CHUNK = 40;
+  for (let i = 0; i < toVerify.length; i += UPDATE_CHUNK) {
+    const chunk = toVerify.slice(i, i + UPDATE_CHUNK);
+    const { error } = await supabase
+      .from('ingestion_files')
+      .update({ verified_ingested_at: now })
+      .in('id', chunk.map((f) => f.id));
+    if (error) throw error;
+  }
+
+  return {
+    externalRecords: externalRows.length,
+    externalVerified: verifiedPaths.size,
+    newlyVerified: toVerify.length,
+  };
 }

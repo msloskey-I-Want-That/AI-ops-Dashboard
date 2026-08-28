@@ -415,6 +415,13 @@ input[type="checkbox"].row-check, #check-all {
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
+.verified-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--accent-lime);
+  vertical-align: middle;
+}
 
 .empty-state { text-align: center; padding: 52px 20px; color: var(--text-secondary); }
 .empty-state p { margin: 4px 0; }
