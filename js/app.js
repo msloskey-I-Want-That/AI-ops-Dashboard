@@ -9,6 +9,7 @@ import {
   bulkSetFileStatus,
   syncProject,
   fileStage,
+  loadProgressOverview,
 } from './ingestion.js';
 
 const el = (id) => document.getElementById(id);
@@ -113,6 +114,7 @@ function renderAuthState() {
 
 async function bootApp() {
   await refreshProjects();
+  await renderOverview();
 }
 
 // ---------------- Nav ----------------
@@ -125,10 +127,95 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
     const view = btn.dataset.view;
     document.querySelectorAll('.view').forEach((v) => (v.hidden = true));
     el(`view-${view}`).hidden = false;
+    if (view === 'overview') renderOverview();
   });
 });
 
-// ---------------- Ingestion: projects ----------------
+// ---------------- Overview ----------------
+
+let overviewChart = null;
+
+el('btn-refresh-overview').addEventListener('click', () => renderOverview());
+
+async function renderOverview() {
+  const kpiRow = el('overview-kpi-row');
+  const note = el('overview-note');
+  note.textContent = '';
+
+  let rows;
+  try {
+    rows = await loadProgressOverview();
+  } catch (err) {
+    kpiRow.innerHTML = '';
+    note.textContent = `Could not load overview: ${err.message || err}`;
+    return;
+  }
+
+  const synced = rows.filter((r) => Number(r.total_files) > 0);
+  const notSynced = rows.filter((r) => Number(r.total_files) === 0);
+
+  const totals = synced.reduce(
+    (acc, r) => {
+      acc.total += Number(r.total_files);
+      acc.missing += Number(r.missing_from_gcs);
+      acc.notIngested += Number(r.not_ingested);
+      acc.notTested += Number(r.not_tested);
+      acc.tested += Number(r.fully_tested);
+      return acc;
+    },
+    { total: 0, missing: 0, notIngested: 0, notTested: 0, tested: 0 }
+  );
+
+  const kpi = (label, num, color) => `
+    <div class="kpi-card">
+      <p class="kpi-label">${escapeHtml(label)}</p>
+      <p class="kpi-num mono"${color ? ` style="color:${color}"` : ''}>${num.toLocaleString()}</p>
+    </div>`;
+  kpiRow.innerHTML =
+    kpi('Files tracked', totals.total) +
+    kpi('Fully tested', totals.tested, 'var(--stage-tested)') +
+    kpi('Queued for ingestion', totals.notIngested, 'var(--stage-not-ingested)') +
+    kpi('Needs Drive → GCS copy', totals.missing, 'var(--stage-missing)');
+
+  note.textContent = notSynced.length
+    ? `Not yet synced: ${notSynced.map((r) => r.display_name).join(', ')}.`
+    : '';
+
+  // Sort ascending so the largest project ends up at the top of the
+  // horizontal bar (Chart.js renders category index 0 at the bottom).
+  const sorted = [...synced].sort((a, b) => Number(a.total_files) - Number(b.total_files));
+
+  const ctx = document.getElementById('overview-chart');
+  const chartData = {
+    labels: sorted.map((r) => r.display_name),
+    datasets: [
+      { label: 'Missing from GCS', data: sorted.map((r) => Number(r.missing_from_gcs)), backgroundColor: '#ff6b6a', stack: 's' },
+      { label: 'Not yet ingested', data: sorted.map((r) => Number(r.not_ingested)), backgroundColor: '#ff9552', stack: 's' },
+      { label: 'Ingested, not tested', data: sorted.map((r) => Number(r.not_tested)), backgroundColor: '#ffd166', stack: 's' },
+      { label: 'Fully tested', data: sorted.map((r) => Number(r.fully_tested)), backgroundColor: '#c3f53a', stack: 's' },
+    ],
+  };
+
+  if (overviewChart) {
+    overviewChart.data = chartData;
+    overviewChart.update();
+  } else {
+    overviewChart = new Chart(ctx, {
+      type: 'bar',
+      data: chartData,
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { stacked: true, grid: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#9a9ca3' } },
+          y: { stacked: true, grid: { display: false }, ticks: { color: '#9a9ca3' } },
+        },
+      },
+    });
+  }
+}
 
 async function refreshProjects() {
   state.projects = await loadProjects();

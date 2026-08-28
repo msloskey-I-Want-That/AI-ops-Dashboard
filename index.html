@@ -11,6 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -53,7 +54,10 @@
           <span>AI Ops</span>
         </div>
         <nav class="nav">
-          <button class="nav-item is-active" data-view="ingestion">
+          <button class="nav-item is-active" data-view="overview">
+            <span class="nav-dot"></span> Overview
+          </button>
+          <button class="nav-item" data-view="ingestion">
             <span class="nav-dot"></span> Ingestion Tracker
           </button>
           <button class="nav-item" data-view="accounts" disabled>
@@ -75,8 +79,35 @@
     </aside>
 
     <main class="content">
+      <!-- Overview view -->
+      <section id="view-overview" class="view">
+        <header class="view-header">
+          <div>
+            <h1>Overview</h1>
+            <p class="view-sub">Live pipeline progress across every tracked project.</p>
+          </div>
+          <button id="btn-refresh-overview" class="btn btn-secondary">Refresh</button>
+        </header>
+
+        <div id="overview-kpi-row" class="kpi-row"></div>
+
+        <div class="legend-row">
+          <span class="legend-item"><span class="legend-swatch" style="background:var(--stage-missing)"></span>Missing from GCS</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:var(--stage-not-ingested)"></span>Not yet ingested</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:var(--stage-not-tested)"></span>Ingested, not tested</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:var(--stage-tested)"></span>Fully tested</span>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-wrap">
+            <canvas id="overview-chart"></canvas>
+          </div>
+        </div>
+        <p id="overview-note" class="overview-note"></p>
+      </section>
+
       <!-- Ingestion Tracker view -->
-      <section id="view-ingestion" class="view">
+      <section id="view-ingestion" class="view" hidden>
         <header class="view-header">
           <div>
             <h1>Ingestion Tracker</h1>

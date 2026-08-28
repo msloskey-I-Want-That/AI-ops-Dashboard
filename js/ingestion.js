@@ -155,3 +155,12 @@ export function fileStage(file) {
   const tested = !!file.tested_at;
   return { inDrive, inGcs, ingested, tested };
 }
+
+// Cross-project progress stats, computed server-side (see the
+// get_ingestion_progress Postgres function) so it stays fast regardless of
+// how many files are tracked overall.
+export async function loadProgressOverview() {
+  const { data, error } = await supabase.rpc('get_ingestion_progress');
+  if (error) throw error;
+  return data;
+}
