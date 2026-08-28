@@ -188,7 +188,11 @@ el('btn-sync').addEventListener('click', async () => {
 
   const token = getCachedGoogleToken();
   if (!token) {
-    showSyncStatus('Your Google session for Drive/Cloud Storage has expired. Sign out and back in to refresh it.', true);
+    showSyncStatusWithAction(
+      'Your Google session for Drive/Cloud Storage has expired. ',
+      'Reconnect Google',
+      () => signInWithGoogle()
+    );
     return;
   }
 
@@ -216,10 +220,36 @@ el('btn-sync').addEventListener('click', async () => {
 
 function showSyncStatus(message, isError, isSuccess) {
   const box = el('sync-status');
+  box.innerHTML = '';
   box.textContent = message;
   box.hidden = false;
   box.classList.toggle('is-error', !!isError);
   box.classList.toggle('is-success', !!isSuccess);
+}
+
+function showSyncStatusWithAction(message, actionLabel, onAction) {
+  const box = el('sync-status');
+  box.innerHTML = '';
+  box.hidden = false;
+  box.classList.add('is-error');
+  box.classList.remove('is-success');
+
+  const span = document.createElement('span');
+  span.textContent = message;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-secondary btn-sm';
+  btn.textContent = actionLabel;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Reconnecting…';
+    try {
+      await onAction();
+    } catch (err) {
+      showSyncStatus(err.message || 'Reconnect failed.', true);
+    }
+  });
+  box.appendChild(span);
+  box.appendChild(btn);
 }
 
 // ---------------- File table ----------------

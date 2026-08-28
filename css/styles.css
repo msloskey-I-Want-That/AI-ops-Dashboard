@@ -281,6 +281,10 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
   font-size: 13px;
   background: var(--glass-fill-strong);
   border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .sync-status.is-error { border-color: rgba(255, 107, 106, 0.4); background: var(--danger-soft); color: var(--danger); }
 .sync-status.is-success { border-color: rgba(195, 245, 58, 0.4); background: var(--accent-lime-soft); color: var(--accent-lime); }
