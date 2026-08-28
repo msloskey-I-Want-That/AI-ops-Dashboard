@@ -574,6 +574,91 @@ function renderStats(total, missingFromGcs, notIngested, notTested, totalBytes) 
 
 // ---------------- Add / edit project dialog ----------------
 
+el('btn-sync-all').addEventListener('click', syncAllProjects);
+
+async function syncAllProjects() {
+  const eligible = state.projects.filter((p) => p.drive_folder_id && p.gcs_bucket_name);
+  const skipped = state.projects.filter((p) => !p.drive_folder_id || !p.gcs_bucket_name);
+  const statusBox = el('sync-all-status');
+  const btn = el('btn-sync-all');
+
+  if (eligible.length === 0) {
+    statusBox.hidden = false;
+    statusBox.classList.add('is-error');
+    statusBox.textContent = 'No projects have both a Drive folder and GCS bucket set yet — nothing to sync.';
+    return;
+  }
+
+  let token = getCachedGoogleToken();
+  if (!token) {
+    statusBox.hidden = false;
+    statusBox.innerHTML = '';
+    statusBox.classList.add('is-error');
+    const span = document.createElement('span');
+    span.textContent = 'Your Google session for Drive/Cloud Storage has expired. ';
+    const reconnectBtn = document.createElement('button');
+    reconnectBtn.className = 'btn btn-secondary btn-sm';
+    reconnectBtn.textContent = 'Reconnect Google';
+    reconnectBtn.addEventListener('click', () => signInWithGoogle());
+    statusBox.appendChild(span);
+    statusBox.appendChild(reconnectBtn);
+    return;
+  }
+
+  btn.disabled = true;
+  statusBox.hidden = false;
+  statusBox.classList.remove('is-error', 'is-success');
+
+  const failures = [];
+  for (let i = 0; i < eligible.length; i++) {
+    const project = eligible[i];
+    statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name}…`;
+    try {
+      await syncProject(project, token, (done, total) => {
+        if (total > 500) {
+          statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name} — saving ${done}/${total}…`;
+        }
+      });
+      // Keep the on-screen table current if this project happens to be the
+      // one currently selected.
+      if (project.id === state.activeProjectId) {
+        state.files = await loadFiles(project.id);
+        state.selectedFileIds = new Set();
+        state.activeFilter = null;
+        renderFileTable();
+      }
+    } catch (err) {
+      if (err.isGoogleAuthError) {
+        clearGoogleToken();
+        statusBox.innerHTML = '';
+        const span = document.createElement('span');
+        span.textContent = `Google session expired partway through (stopped at ${project.display_name}). `;
+        const reconnectBtn = document.createElement('button');
+        reconnectBtn.className = 'btn btn-secondary btn-sm';
+        reconnectBtn.textContent = 'Reconnect Google';
+        reconnectBtn.addEventListener('click', () => signInWithGoogle());
+        statusBox.appendChild(span);
+        statusBox.appendChild(reconnectBtn);
+        statusBox.classList.add('is-error');
+        btn.disabled = false;
+        return;
+      }
+      failures.push({ name: project.display_name, message: err.message || String(err) });
+    }
+  }
+
+  btn.disabled = false;
+  const skippedNote = skipped.length ? ` (${skipped.length} skipped — no Drive folder/bucket set: ${skipped.map((p) => p.display_name).join(', ')})` : '';
+  if (failures.length === 0) {
+    statusBox.classList.remove('is-error');
+    statusBox.classList.add('is-success');
+    statusBox.textContent = `Synced ${eligible.length} project(s).${skippedNote}`;
+  } else {
+    statusBox.classList.add('is-error');
+    statusBox.classList.remove('is-success');
+    statusBox.textContent = `Synced ${eligible.length - failures.length}/${eligible.length} project(s). Failed: ${failures.map((f) => `${f.name} (${f.message})`).join('; ')}${skippedNote}`;
+  }
+}
 el('btn-add-project').addEventListener('click', () => openProjectDialog(null));
 el('btn-edit-project').addEventListener('click', () => {
   const project = state.projects.find((p) => p.id === state.activeProjectId);

@@ -236,6 +236,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
   gap: 16px;
 }
 .view-header h1 { font-size: 24px; margin: 0 0 4px; font-weight: 650; letter-spacing: -0.02em; }
+.header-actions { display: flex; gap: 10px; }
 .view-sub { color: var(--text-secondary); font-size: 14px; margin: 0; }
 
 /* ---------- Project bar ---------- */

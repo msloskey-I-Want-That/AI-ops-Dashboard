@@ -113,8 +113,13 @@
             <h1>Ingestion Tracker</h1>
             <p class="view-sub">Drive → Cloud Storage → Supabase, reconciled in one place.</p>
           </div>
-          <button id="btn-add-project" class="btn btn-secondary">+ Add project</button>
+          <div class="header-actions">
+            <button id="btn-sync-all" class="btn btn-secondary">Sync all</button>
+            <button id="btn-add-project" class="btn btn-secondary">+ Add project</button>
+          </div>
         </header>
+
+        <div id="sync-all-status" class="sync-status" hidden></div>
 
         <div class="project-bar" id="project-bar">
           <!-- project chips injected here -->
