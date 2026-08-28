@@ -379,8 +379,11 @@ el('btn-verify').addEventListener('click', async () => {
     state.selectedFileIds = new Set();
     state.activeFilter = null;
     renderFileTable();
+    const statusSummary = Object.entries(result.statusCounts)
+      .map(([status, count]) => `${status}: ${count}`)
+      .join(', ');
     showSyncStatus(
-      `Verified against ${result.externalRecords} case-database record(s) — ${result.externalVerified} marked ingested there, ${result.newlyVerified} newly confirmed here.`,
+      `Verified against ${result.externalRecords} case-database record(s) (${statusSummary}) — ${result.newlyVerified} newly confirmed here.`,
       false,
       true
     );

@@ -182,7 +182,7 @@ export async function verifyIngestion(project, onProgress) {
   const pathCol = project.verify_path_column || 'gcs_archive_path';
   const statusCol = project.verify_status_column || 'ingestion_status';
   const successValue = project.verify_success_value || 'indexed';
-  const prefix = `${project.gcs_bucket_name}/`;
+  const prefix = project.verify_path_prefix ?? `${project.gcs_bucket_name}/`;
 
   // Pull every row's path + status from the external table, paginated the
   // same way our own reads are (same underlying Supabase row cap applies).
@@ -207,6 +207,12 @@ export async function verifyIngestion(project, onProgress) {
       .map((r) => (r[pathCol] || '').startsWith(prefix) ? r[pathCol].slice(prefix.length) : r[pathCol])
   );
 
+  const statusCounts = {};
+  for (const r of externalRows) {
+    const s = r[statusCol] ?? '(null)';
+    statusCounts[s] = (statusCounts[s] || 0) + 1;
+  }
+
   const files = await loadFiles(project.id);
   const now = new Date().toISOString();
   const toVerify = files.filter((f) => verifiedPaths.has(f.file_name) && !f.verified_ingested_at);
@@ -225,5 +231,6 @@ export async function verifyIngestion(project, onProgress) {
     externalRecords: externalRows.length,
     externalVerified: verifiedPaths.size,
     newlyVerified: toVerify.length,
+    statusCounts,
   };
 }
