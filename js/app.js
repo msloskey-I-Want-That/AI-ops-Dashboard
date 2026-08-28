@@ -134,6 +134,7 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
 // ---------------- Overview ----------------
 
 let overviewChart = null;
+let overviewSizeChart = null;
 
 el('btn-refresh-overview').addEventListener('click', () => renderOverview());
 
@@ -189,7 +190,7 @@ async function renderOverview() {
 
   const ctx = document.getElementById('overview-chart');
   const chartData = {
-    labels: sorted.map((r) => `${r.display_name} (${formatBytes(r.total_bytes)})`),
+    labels: sorted.map((r) => r.display_name),
     datasets: [
       { label: 'Missing from GCS', data: sorted.map((r) => Number(r.missing_from_gcs)), backgroundColor: '#ff6b6a', stack: 's' },
       { label: 'Not yet ingested', data: sorted.map((r) => Number(r.not_ingested)), backgroundColor: '#ff9552', stack: 's' },
@@ -213,6 +214,48 @@ async function renderOverview() {
         scales: {
           x: { stacked: true, grid: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#9a9ca3' } },
           y: { stacked: true, grid: { display: false }, ticks: { color: '#9a9ca3' } },
+        },
+      },
+    });
+  }
+
+  // Second chart: data volume by project, sorted independently by size
+  // (biggest file count and biggest data volume aren't always the same
+  // project — e.g. many small files vs. a few huge ones).
+  const sortedBySize = [...synced].sort((a, b) => Number(a.total_bytes) - Number(b.total_bytes));
+  const sizeCtx = document.getElementById('overview-size-chart');
+  const sizeData = {
+    labels: sortedBySize.map((r) => r.display_name),
+    datasets: [
+      {
+        label: 'Data volume',
+        data: sortedBySize.map((r) => Number(r.total_bytes)),
+        backgroundColor: '#c3f53a',
+      },
+    ],
+  };
+
+  if (overviewSizeChart) {
+    overviewSizeChart.data = sizeData;
+    overviewSizeChart.update();
+  } else {
+    overviewSizeChart = new Chart(sizeCtx, {
+      type: 'bar',
+      data: sizeData,
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => formatBytes(ctx.parsed.x) } },
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(255,255,255,0.08)' },
+            ticks: { color: '#9a9ca3', callback: (value) => formatBytes(value) },
+          },
+          y: { grid: { display: false }, ticks: { color: '#9a9ca3' } },
         },
       },
     });
