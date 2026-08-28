@@ -293,11 +293,32 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
   padding: 13px 17px;
   min-width: 122px;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-glass);
 }
+.stat:hover { border-color: var(--glass-border-strong); background: var(--glass-fill); }
+.stat.is-selected { border-color: var(--accent-lime); box-shadow: 0 0 0 1px var(--accent-lime) inset; }
 .stat-num { font-family: var(--font-mono); font-size: 21px; font-weight: 700; }
 .stat-label { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
 .stat.is-flagged { border-color: rgba(255, 149, 82, 0.35); background: var(--accent-orange-soft); }
 .stat.is-flagged .stat-num { color: var(--accent-orange); }
+
+/* ---------- Filter bar ---------- */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--accent-orange-soft);
+  border: 1px solid rgba(255, 149, 82, 0.35);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  margin-bottom: 14px;
+}
+.filter-label { font-size: 13px; font-weight: 600; color: var(--accent-orange); }
+.filter-actions { display: flex; gap: 8px; }
 
 /* ---------- Bulk action bar ---------- */
 .bulk-bar {

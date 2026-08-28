@@ -20,7 +20,27 @@ let state = {
   files: [],
   editingProjectId: null, // set when the dialog is open in "edit" mode
   selectedFileIds: new Set(),
+  activeFilter: null, // null | 'missingFromGcs' | 'notIngested' | 'notTested'
 };
+
+const FILTER_LABELS = {
+  missingFromGcs: 'in Drive, missing from GCS',
+  notIngested: 'in GCS, not ingested',
+  notTested: 'ingested, not tested',
+};
+
+function matchesFilter(file, filterKey) {
+  if (!filterKey) return true;
+  const { inDrive, inGcs, ingested, tested } = fileStage(file);
+  if (filterKey === 'missingFromGcs') return inDrive && !inGcs;
+  if (filterKey === 'notIngested') return inGcs && !ingested;
+  if (filterKey === 'notTested') return ingested && !tested;
+  return true;
+}
+
+function getVisibleFiles() {
+  return state.files.filter((f) => matchesFilter(f, state.activeFilter));
+}
 
 // ---------------- Auth wiring ----------------
 
@@ -151,6 +171,7 @@ async function selectProject(projectId) {
 
   state.files = await loadFiles(projectId);
   state.selectedFileIds = new Set();
+  state.activeFilter = null;
   renderFileTable();
 }
 
@@ -182,6 +203,7 @@ el('btn-sync').addEventListener('click', async () => {
     });
     state.files = await loadFiles(project.id);
     state.selectedFileIds = new Set();
+    state.activeFilter = null;
     renderFileTable();
     showSyncStatus(`Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.`, false, true);
   } catch (err) {
@@ -205,18 +227,25 @@ function showSyncStatus(message, isError, isSuccess) {
 function renderFileTable() {
   const tbody = el('file-table-body');
   tbody.innerHTML = '';
-  el('empty-state').hidden = state.files.length > 0;
-  el('file-table').hidden = state.files.length === 0;
+
+  const visible = getVisibleFiles();
+  el('empty-state').hidden = visible.length > 0;
+  el('file-table').hidden = visible.length === 0;
 
   let missingFromGcs = 0;
   let notIngested = 0;
   let notTested = 0;
 
+  // Stats always reflect the whole project, regardless of the active filter.
   for (const file of state.files) {
     const { inDrive, inGcs, ingested, tested } = fileStage(file);
     if (inDrive && !inGcs) missingFromGcs++;
     if (inGcs && !ingested) notIngested++;
     if (ingested && !tested) notTested++;
+  }
+
+  for (const file of visible) {
+    const { inDrive, inGcs, ingested, tested } = fileStage(file);
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -249,14 +278,46 @@ function renderFileTable() {
   }
 
   renderStats(state.files.length, missingFromGcs, notIngested, notTested);
+  renderFilterBar();
   renderBulkBar();
   syncCheckAllState();
 }
 
+function renderFilterBar() {
+  const bar = el('filter-bar');
+  if (!state.activeFilter) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const count = getVisibleFiles().length;
+  el('filter-label').textContent = `${count} file(s) — ${FILTER_LABELS[state.activeFilter]}`;
+}
+
+el('btn-clear-filter').addEventListener('click', () => {
+  state.activeFilter = null;
+  state.selectedFileIds = new Set();
+  renderFileTable();
+});
+
+el('btn-copy-filtered').addEventListener('click', async () => {
+  const names = getVisibleFiles().map((f) => f.file_name);
+  const text = names.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    showSyncStatus(`Copied ${names.length} file name(s) to clipboard.`, false, true);
+  } catch {
+    showSyncStatus('Could not copy automatically — select and copy the list below.', true);
+    // Fallback: show it in a prompt so it can still be copied manually.
+    window.prompt('Copy this list:', text);
+  }
+});
+
 function syncCheckAllState() {
   const checkAll = el('check-all');
-  const total = state.files.length;
-  const selected = state.selectedFileIds.size;
+  const visible = getVisibleFiles();
+  const total = visible.length;
+  const selected = visible.filter((f) => state.selectedFileIds.has(f.id)).length;
   checkAll.checked = total > 0 && selected === total;
   checkAll.indeterminate = selected > 0 && selected < total;
 }
@@ -268,10 +329,11 @@ function renderBulkBar() {
 }
 
 el('check-all').addEventListener('change', (e) => {
+  const visibleIds = getVisibleFiles().map((f) => f.id);
   if (e.target.checked) {
-    state.selectedFileIds = new Set(state.files.map((f) => f.id));
+    visibleIds.forEach((id) => state.selectedFileIds.add(id));
   } else {
-    state.selectedFileIds = new Set();
+    visibleIds.forEach((id) => state.selectedFileIds.delete(id));
   }
   renderFileTable();
 });
@@ -361,16 +423,26 @@ async function toggleStatus(file, stage, on) {
 
 function renderStats(total, missingFromGcs, notIngested, notTested) {
   const row = el('stat-row');
-  const stat = (num, label, flagged) => `
-    <div class="stat${flagged && num > 0 ? ' is-flagged' : ''}">
-      <div class="stat-num mono">${num}</div>
-      <div class="stat-label">${label}</div>
-    </div>`;
-  row.innerHTML =
-    stat(total, 'files tracked', false) +
-    stat(missingFromGcs, 'in Drive, missing from GCS', true) +
-    stat(notIngested, 'in GCS, not ingested', true) +
-    stat(notTested, 'ingested, not tested', true);
+  row.innerHTML = '';
+
+  const makeStat = (num, label, flagged, filterKey) => {
+    const btn = document.createElement('button');
+    btn.className = 'stat' + (flagged && num > 0 ? ' is-flagged' : '') + (state.activeFilter === filterKey ? ' is-selected' : '');
+    btn.innerHTML = `<div class="stat-num mono">${num}</div><div class="stat-label">${label}</div>`;
+    btn.addEventListener('click', () => {
+      if (!filterKey || num === 0) return;
+      state.activeFilter = state.activeFilter === filterKey ? null : filterKey;
+      state.selectedFileIds = new Set();
+      renderFileTable();
+    });
+    if (!filterKey || num === 0) btn.style.cursor = 'default';
+    return btn;
+  };
+
+  row.appendChild(makeStat(total, 'files tracked', false, null));
+  row.appendChild(makeStat(missingFromGcs, 'in Drive, missing from GCS', true, 'missingFromGcs'));
+  row.appendChild(makeStat(notIngested, 'in GCS, not ingested', true, 'notIngested'));
+  row.appendChild(makeStat(notTested, 'ingested, not tested', true, 'notTested'));
 }
 
 // ---------------- Add / edit project dialog ----------------
