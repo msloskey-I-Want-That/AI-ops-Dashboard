@@ -54,9 +54,9 @@ export async function setFileStatus(fileId, stage, on, userEmail) {
 
 // Bulk version — for clearing a historical backlog (e.g. 1000 pre-existing
 // files) instead of toggling one at a time. Chunked because a single request
-// with hundreds of UUIDs in the `.in()` filter builds a URL long enough to
-// hit server-side URL length limits and get rejected with a 400.
-const BULK_CHUNK_SIZE = 150;
+// with many UUIDs in the `.in()` filter builds a URL long enough to hit
+// server-side URL length limits and get rejected with a 400.
+const BULK_CHUNK_SIZE = 40;
 
 export async function bulkSetFileStatus(fileIds, stage, on, userEmail, onProgress) {
   if (fileIds.length === 0) return [];
@@ -69,7 +69,11 @@ export async function bulkSetFileStatus(fileIds, stage, on, userEmail, onProgres
   for (let i = 0; i < fileIds.length; i += BULK_CHUNK_SIZE) {
     const chunk = fileIds.slice(i, i + BULK_CHUNK_SIZE);
     const { data, error } = await supabase.from('ingestion_files').update(fields).in('id', chunk).select();
-    if (error) throw error;
+    if (error) {
+      console.error('bulkSetFileStatus chunk failed:', { chunkStart: i, chunkSize: chunk.length, error });
+      const detail = [error.message, error.details, error.hint].filter(Boolean).join(' — ');
+      throw new Error(detail || `Update failed on batch starting at file ${i + 1} of ${fileIds.length}.`);
+    }
     results.push(...data);
     if (onProgress) onProgress(Math.min(i + BULK_CHUNK_SIZE, fileIds.length), fileIds.length);
   }

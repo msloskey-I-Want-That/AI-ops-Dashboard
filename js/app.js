@@ -282,7 +282,7 @@ el('btn-bulk-clear').addEventListener('click', () => {
 el('btn-bulk-ingested').addEventListener('click', () => bulkApply('ingested'));
 el('btn-bulk-tested').addEventListener('click', () => bulkApply('tested'));
 
-const BULK_PROGRESS_THRESHOLD = 150;
+const BULK_PROGRESS_THRESHOLD = 40;
 
 async function bulkApply(stage) {
   const ids = Array.from(state.selectedFileIds);
