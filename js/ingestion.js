@@ -52,18 +52,28 @@ export async function setFileStatus(fileId, stage, on, userEmail) {
   return data;
 }
 
-// Bulk version — one Supabase call for any number of files, for clearing a
-// historical backlog (e.g. 1000 pre-existing files) instead of toggling one
-// at a time.
-export async function bulkSetFileStatus(fileIds, stage, on, userEmail) {
+// Bulk version — for clearing a historical backlog (e.g. 1000 pre-existing
+// files) instead of toggling one at a time. Chunked because a single request
+// with hundreds of UUIDs in the `.in()` filter builds a URL long enough to
+// hit server-side URL length limits and get rejected with a 400.
+const BULK_CHUNK_SIZE = 150;
+
+export async function bulkSetFileStatus(fileIds, stage, on, userEmail, onProgress) {
   if (fileIds.length === 0) return [];
   const fields =
     stage === 'ingested'
       ? { ingested_at: on ? new Date().toISOString() : null, ingested_by: on ? userEmail : null }
       : { tested_at: on ? new Date().toISOString() : null, tested_by: on ? userEmail : null };
-  const { data, error } = await supabase.from('ingestion_files').update(fields).in('id', fileIds).select();
-  if (error) throw error;
-  return data;
+
+  const results = [];
+  for (let i = 0; i < fileIds.length; i += BULK_CHUNK_SIZE) {
+    const chunk = fileIds.slice(i, i + BULK_CHUNK_SIZE);
+    const { data, error } = await supabase.from('ingestion_files').update(fields).in('id', chunk).select();
+    if (error) throw error;
+    results.push(...data);
+    if (onProgress) onProgress(Math.min(i + BULK_CHUNK_SIZE, fileIds.length), fileIds.length);
+  }
+  return results;
 }
 
 export async function updateFileNotes(fileId, notes) {

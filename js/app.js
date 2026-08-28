@@ -282,6 +282,8 @@ el('btn-bulk-clear').addEventListener('click', () => {
 el('btn-bulk-ingested').addEventListener('click', () => bulkApply('ingested'));
 el('btn-bulk-tested').addEventListener('click', () => bulkApply('tested'));
 
+const BULK_PROGRESS_THRESHOLD = 150;
+
 async function bulkApply(stage) {
   const ids = Array.from(state.selectedFileIds);
   if (ids.length === 0) return;
@@ -289,16 +291,19 @@ async function bulkApply(stage) {
   const btn = stage === 'ingested' ? el('btn-bulk-ingested') : el('btn-bulk-tested');
   const originalText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Applying…';
+  const onProgress = (done, total) => {
+    btn.textContent = total > BULK_PROGRESS_THRESHOLD ? `Applying ${done}/${total}…` : 'Applying…';
+  };
+  onProgress(0, ids.length);
   try {
     let updated;
     if (stage === 'tested') {
       // Tested implies ingested — stamp both so the pipeline stays consistent,
       // same rule the individual per-row toggle enforces.
-      await bulkSetFileStatus(ids, 'ingested', true, email);
-      updated = await bulkSetFileStatus(ids, 'tested', true, email);
+      await bulkSetFileStatus(ids, 'ingested', true, email, onProgress);
+      updated = await bulkSetFileStatus(ids, 'tested', true, email, onProgress);
     } else {
-      updated = await bulkSetFileStatus(ids, 'ingested', true, email);
+      updated = await bulkSetFileStatus(ids, 'ingested', true, email, onProgress);
     }
     const byId = new Map(updated.map((f) => [f.id, f]));
     state.files = state.files.map((f) => byId.get(f.id) || f);
