@@ -59,7 +59,7 @@ body {
 
 button { font-family: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }
-input, textarea {
+input:not([type="checkbox"]), textarea {
   font-family: inherit;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-border);
@@ -69,7 +69,7 @@ input, textarea {
   font-size: 14px;
   transition: border-color 0.15s var(--ease-glass), background 0.15s var(--ease-glass);
 }
-input:focus, textarea:focus {
+input:not([type="checkbox"]):focus, textarea:focus {
   background: rgba(255, 255, 255, 0.08);
   border-color: var(--glass-border-strong);
 }
@@ -318,6 +318,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
 input[type="checkbox"].row-check, #check-all {
   width: 16px;
   height: 16px;
+  margin: 0;
   accent-color: var(--accent-lime);
   cursor: pointer;
 }
