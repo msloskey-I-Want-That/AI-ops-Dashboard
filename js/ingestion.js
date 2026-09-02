@@ -104,10 +104,14 @@ export async function updateFileNotes(fileId, notes) {
 // ingestion_files. Matches Drive files to GCS objects by filename. Existing
 // manual status (ingested_at/tested_at) on a file is left untouched.
 export async function syncProject(project, googleAccessToken, onProgress) {
+  const emit = (event) => { if (onProgress) onProgress(event); };
+
+  emit({ phase: 'listing' });
   const [driveFiles, gcsObjects] = await Promise.all([
     project.drive_folder_id ? listDriveFiles(project.drive_folder_id, googleAccessToken) : Promise.resolve([]),
     project.gcs_bucket_name ? listGcsObjects(project.gcs_bucket_name, googleAccessToken) : Promise.resolve([]),
   ]);
+  emit({ phase: 'listed', driveCount: driveFiles.length, gcsCount: gcsObjects.length });
 
   const now = new Date().toISOString();
   const byName = new Map();
@@ -137,6 +141,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
   const copyResult = { copied: 0, skippedExists: 0, skippedNative: 0, failed: [] };
   if (project.gcs_bucket_name) {
     const toCopy = Array.from(byName.entries()).filter(([, row]) => row.drive_last_seen_at && !row.gcs_last_seen_at);
+    if (toCopy.length > 0) emit({ phase: 'copy-start', total: toCopy.length });
     const COPY_CONCURRENCY = 4;
     let cursor = 0;
     async function copyWorker() {
@@ -147,6 +152,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
         if (!meta) continue;
         if (isGoogleNativeFile(meta.mimeType)) {
           copyResult.skippedNative++;
+          emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'skipped-native' });
           continue;
         }
         try {
@@ -155,15 +161,17 @@ export async function syncProject(project, googleAccessToken, onProgress) {
           if (outcome === 'uploaded') {
             copyResult.copied++;
             byName.set(name, { ...row, gcs_object_name: name, gcs_size_bytes: blob.size, gcs_last_seen_at: now });
+            emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'copied' });
           } else {
             copyResult.skippedExists++;
             byName.set(name, { ...row, gcs_object_name: name, gcs_last_seen_at: now });
+            emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'skipped-exists' });
           }
         } catch (err) {
           copyResult.failed.push({ name, message: err.message || String(err) });
+          emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'failed', message: err.message });
           if (err.isGoogleAuthError) throw err; // stop everything, session's gone
         }
-        if (onProgress) onProgress(`copy:${idx + 1}/${toCopy.length}`);
       }
     }
     await Promise.all(Array.from({ length: Math.min(COPY_CONCURRENCY, toCopy.length) }, copyWorker));
@@ -175,13 +183,14 @@ export async function syncProject(project, googleAccessToken, onProgress) {
   // Supabase caps a single write at ~1000 rows and silently truncates rather
   // than erroring, so large projects (thousands of GCS objects) need batching.
   const SYNC_CHUNK_SIZE = 500;
+  emit({ phase: 'save-start', total: rows.length });
   for (let i = 0; i < rows.length; i += SYNC_CHUNK_SIZE) {
     const chunk = rows.slice(i, i + SYNC_CHUNK_SIZE);
     const { error } = await supabase
       .from('ingestion_files')
       .upsert(chunk, { onConflict: 'project_id,file_name' });
     if (error) throw error;
-    if (onProgress) onProgress(Math.min(i + SYNC_CHUNK_SIZE, rows.length), rows.length);
+    emit({ phase: 'save', done: Math.min(i + SYNC_CHUNK_SIZE, rows.length), total: rows.length });
   }
 
   return { driveCount: driveFiles.length, gcsCount: gcsObjects.length, ...copyResult };

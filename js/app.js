@@ -309,6 +309,71 @@ async function selectProject(projectId) {
   renderFileTable();
 }
 
+// ---------------- Sync progress dialog ----------------
+
+function openProgressDialog(title) {
+  el('sync-progress-title').textContent = title;
+  el('sync-progress-phase').textContent = 'Starting…';
+  el('sync-progress-log').innerHTML = '';
+  const bar = el('sync-progress-bar');
+  bar.style.width = '0%';
+  bar.classList.add('is-indeterminate');
+  el('sync-progress-dialog').showModal();
+}
+
+function setProgressPhase(text) {
+  el('sync-progress-phase').textContent = text;
+}
+
+function setProgressBar(pct) {
+  const bar = el('sync-progress-bar');
+  bar.classList.remove('is-indeterminate');
+  bar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+}
+
+function setProgressIndeterminate() {
+  el('sync-progress-bar').classList.add('is-indeterminate');
+}
+
+function appendProgressLog(text, cls) {
+  const log = el('sync-progress-log');
+  const line = document.createElement('div');
+  line.className = 'progress-log-line' + (cls ? ` is-${cls}` : '');
+  line.textContent = text;
+  log.appendChild(line);
+  while (log.children.length > 300) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+el('btn-close-sync-progress').addEventListener('click', () => el('sync-progress-dialog').close());
+
+// Shared handler for syncProject's progress events — used by both the
+// single-project Sync button and Sync all. `prefix` lets Sync all tag log
+// lines with which project they belong to.
+function handleSyncProgressEvent(event, prefix = '') {
+  if (event.phase === 'listing') {
+    setProgressPhase(`${prefix}Listing Drive and Cloud Storage…`);
+    setProgressIndeterminate();
+  } else if (event.phase === 'listed') {
+    appendProgressLog(`${prefix}Found ${event.driveCount} file(s) in Drive, ${event.gcsCount} object(s) in GCS.`);
+  } else if (event.phase === 'copy-start') {
+    setProgressPhase(`${prefix}Copying ${event.total} missing file(s) to GCS…`);
+  } else if (event.phase === 'copy') {
+    setProgressPhase(`${prefix}Copying to GCS — ${event.index}/${event.total}`);
+    setProgressBar((event.index / event.total) * 100);
+    if (event.outcome === 'copied') appendProgressLog(`${prefix}Copied: ${event.name}`, 'copied');
+    else if (event.outcome === 'skipped-exists') appendProgressLog(`${prefix}Already existed: ${event.name}`, 'skipped');
+    else if (event.outcome === 'skipped-native') appendProgressLog(`${prefix}Skipped (native Google Doc): ${event.name}`, 'skipped');
+    else if (event.outcome === 'failed') appendProgressLog(`${prefix}Failed: ${event.name} — ${event.message}`, 'failed');
+  } else if (event.phase === 'save-start') {
+    setProgressPhase(`${prefix}Saving ${event.total} file record(s)…`);
+    setProgressIndeterminate();
+  } else if (event.phase === 'save') {
+    setProgressPhase(`${prefix}Saving file records — ${event.done}/${event.total}`);
+    setProgressBar((event.done / event.total) * 100);
+  }
+}
+
 // ---------------- Sync ----------------
 
 el('btn-sync').addEventListener('click', async () => {
@@ -333,16 +398,11 @@ el('btn-sync').addEventListener('click', async () => {
   const btn = el('btn-sync');
   btn.disabled = true;
   btn.textContent = 'Syncing…';
-  showSyncStatus('Pulling current state from Drive and Cloud Storage…', false);
+  showSyncStatus('Syncing… see progress window.', false);
+  openProgressDialog(`Syncing ${project.display_name}`);
 
   try {
-    const result = await syncProject(project, token, (a, b) => {
-      if (typeof a === 'string' && a.startsWith('copy:')) {
-        showSyncStatus(`Copying missing files to GCS — ${a.slice(5)}…`, false);
-      } else if (b > 500) {
-        showSyncStatus(`Saving ${a}/${b} file records…`, false);
-      }
-    });
+    const result = await syncProject(project, token, (event) => handleSyncProgressEvent(event));
     state.files = await loadFiles(project.id);
     state.selectedFileIds = new Set();
     state.activeFilter = null;
@@ -355,6 +415,10 @@ el('btn-sync').addEventListener('click', async () => {
     if (result.failed && result.failed.length) copyParts.push(`${result.failed.length} failed`);
     const copySummary = copyParts.length ? ` — ${copyParts.join(', ')}.` : '';
 
+    setProgressPhase('Done.');
+    setProgressBar(100);
+    appendProgressLog(`Finished — ${result.driveCount} in Drive, ${result.gcsCount} in GCS.${copySummary}`, 'copied');
+
     showSyncStatus(
       `Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.${copySummary}`,
       result.failed && result.failed.length > 0,
@@ -364,8 +428,12 @@ el('btn-sync').addEventListener('click', async () => {
     if (err.isGoogleAuthError) {
       clearGoogleToken();
       showSyncStatusWithAction(err.message + ' ', 'Reconnect Google', () => signInWithGoogle());
+      setProgressPhase('Stopped — Google session expired.');
+      appendProgressLog(err.message || 'Google session expired.', 'failed');
     } else {
       showSyncStatus(err.message || 'Sync failed.', true);
+      setProgressPhase('Failed.');
+      appendProgressLog(err.message || 'Sync failed.', 'failed');
     }
   } finally {
     btn.disabled = false;
@@ -836,20 +904,16 @@ async function syncAllProjects() {
   btn.disabled = true;
   statusBox.hidden = false;
   statusBox.classList.remove('is-error', 'is-success');
+  openProgressDialog(`Syncing ${eligible.length} project(s)`);
 
   const failures = [];
   const copyNotes = [];
   for (let i = 0; i < eligible.length; i++) {
     const project = eligible[i];
     statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name}…`;
+    const prefix = `[${i + 1}/${eligible.length}] ${project.display_name}: `;
     try {
-      const result = await syncProject(project, token, (a, b) => {
-        if (typeof a === 'string' && a.startsWith('copy:')) {
-          statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name} — copying ${a.slice(5)}…`;
-        } else if (b > 500) {
-          statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name} — saving ${a}/${b}…`;
-        }
-      });
+      const result = await syncProject(project, token, (event) => handleSyncProgressEvent(event, prefix));
       if (result.copied) copyNotes.push(`${project.display_name}: ${result.copied} copied to GCS`);
       if (result.failed && result.failed.length) {
         failures.push({ name: project.display_name, message: `${result.failed.length} file copy failure(s)` });
@@ -876,8 +940,11 @@ async function syncAllProjects() {
         statusBox.appendChild(reconnectBtn);
         statusBox.classList.add('is-error');
         btn.disabled = false;
+        setProgressPhase(`Stopped — Google session expired at ${project.display_name}.`);
+        appendProgressLog(err.message || 'Google session expired.', 'failed');
         return;
       }
+      appendProgressLog(`${prefix}${err.message || String(err)}`, 'failed');
       failures.push({ name: project.display_name, message: err.message || String(err) });
     }
   }
@@ -885,14 +952,18 @@ async function syncAllProjects() {
   btn.disabled = false;
   const skippedNote = skipped.length ? ` (${skipped.length} skipped — no Drive folder/bucket set: ${skipped.map((p) => p.display_name).join(', ')})` : '';
   const copyNote = copyNotes.length ? ` ${copyNotes.join('; ')}.` : '';
+  setProgressPhase('Done.');
+  setProgressBar(100);
   if (failures.length === 0) {
     statusBox.classList.remove('is-error');
     statusBox.classList.add('is-success');
     statusBox.textContent = `Synced ${eligible.length} project(s).${copyNote}${skippedNote}`;
+    appendProgressLog(`All done — ${eligible.length} project(s) synced.${copyNote}`, 'copied');
   } else {
     statusBox.classList.add('is-error');
     statusBox.classList.remove('is-success');
     statusBox.textContent = `Synced ${eligible.length - failures.length}/${eligible.length} project(s). Failed: ${failures.map((f) => `${f.name} (${f.message})`).join('; ')}${copyNote}${skippedNote}`;
+    appendProgressLog(`Finished with ${failures.length} failure(s).`, 'failed');
   }
 }
 el('btn-add-project').addEventListener('click', () => openProjectDialog(null));

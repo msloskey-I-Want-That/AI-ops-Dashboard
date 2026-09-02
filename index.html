@@ -272,6 +272,19 @@
     </form>
   </dialog>
 
+  <!-- Sync progress dialog -->
+  <dialog id="sync-progress-dialog" class="dialog progress-dialog">
+    <div class="dialog-form">
+      <h2 id="sync-progress-title">Syncing…</h2>
+      <p id="sync-progress-phase" class="progress-phase">Starting…</p>
+      <div class="progress-bar-track"><div id="sync-progress-bar" class="progress-bar-fill"></div></div>
+      <div id="sync-progress-log" class="progress-log"></div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-close-sync-progress" class="btn btn-ghost">Close</button>
+      </div>
+    </div>
+  </dialog>
+
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
