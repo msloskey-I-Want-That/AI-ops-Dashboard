@@ -214,6 +214,14 @@ export async function loadProgressOverview() {
   return data;
 }
 
+// Same aggregate, scoped to one project — used so huge projects (millions
+// of rows) can show accurate stats without ever loading the full file list
+// into the browser just to count/sum it client-side.
+export async function loadSingleProjectStats(projectId) {
+  const all = await loadProgressOverview();
+  return all.find((r) => r.project_id === projectId) || null;
+}
+
 // Verifies ingestion against the project's own external case database
 // (its real ingestion pipeline's Supabase project), rather than relying on
 // the manual ingested_at/ingested_by self-report. Matches by GCS path —

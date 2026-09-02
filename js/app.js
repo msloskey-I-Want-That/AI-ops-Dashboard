@@ -10,6 +10,7 @@ import {
   syncProject,
   fileStage,
   loadProgressOverview,
+  loadSingleProjectStats,
   verifyIngestion,
 } from './ingestion.js';
 
@@ -156,6 +157,11 @@ async function renderOverview() {
 
   const synced = rows.filter((r) => Number(r.total_files) > 0);
   const notSynced = rows.filter((r) => Number(r.total_files) === 0);
+  // Projects at MJN's scale (millions of files) would visually swallow
+  // every other project on a shared chart — break them out separately so
+  // the comparison charts stay meaningful for everything else.
+  const chartable = synced.filter((r) => Number(r.total_files) <= LARGE_PROJECT_THRESHOLD);
+  const largeScale = synced.filter((r) => Number(r.total_files) > LARGE_PROJECT_THRESHOLD);
 
   const totals = synced.reduce(
     (acc, r) => {
@@ -186,9 +192,30 @@ async function renderOverview() {
     ? `Not yet synced: ${notSynced.map((r) => r.display_name).join(', ')}.`
     : '';
 
+  const largeSection = el('overview-large-scale');
+  if (largeScale.length === 0) {
+    largeSection.hidden = true;
+  } else {
+    largeSection.hidden = false;
+    largeSection.innerHTML =
+      '<h2 class="section-heading">Large-scale projects (shown separately — too large for the comparison charts)</h2>' +
+      '<div class="kpi-row">' +
+      largeScale
+        .map(
+          (r) => `
+        <div class="kpi-card large-scale-card">
+          <p class="kpi-label">${escapeHtml(r.display_name)}</p>
+          <p class="kpi-num mono">${Number(r.total_files).toLocaleString()} files</p>
+          <p class="kpi-label">${formatBytes(r.total_bytes)} · ${Number(r.missing_from_gcs).toLocaleString()} need GCS copy · ${Number(r.not_ingested).toLocaleString()} queued</p>
+        </div>`
+        )
+        .join('') +
+      '</div>';
+  }
+
   // Sort ascending so the largest project ends up at the top of the
   // horizontal bar (Chart.js renders category index 0 at the bottom).
-  const sorted = [...synced].sort((a, b) => Number(a.total_files) - Number(b.total_files));
+  const sorted = [...chartable].sort((a, b) => Number(a.total_files) - Number(b.total_files));
 
   const ctx = document.getElementById('overview-chart');
   const chartData = {
@@ -224,7 +251,7 @@ async function renderOverview() {
   // Second chart: data volume by project, sorted independently by size
   // (biggest file count and biggest data volume aren't always the same
   // project — e.g. many small files vs. a few huge ones).
-  const sortedBySize = [...synced].sort((a, b) => Number(a.total_bytes) - Number(b.total_bytes));
+  const sortedBySize = [...chartable].sort((a, b) => Number(a.total_bytes) - Number(b.total_bytes));
   const sizeCtx = document.getElementById('overview-size-chart');
   const sizeData = {
     labels: sortedBySize.map((r) => r.display_name),
@@ -287,6 +314,53 @@ function renderProjectBar() {
   }
 }
 
+const LARGE_PROJECT_THRESHOLD = 20000; // files — loading/rendering more than this in the browser risks a crash
+
+// Loads a project's files for the table view, unless it's too large to
+// safely load and render — in which case it shows accurate aggregate stats
+// (a cheap server-side query) instead of ever attempting to pull millions
+// of individual rows into the browser. Used both when selecting a project
+// and after a sync completes.
+async function loadAndRenderProjectFiles(projectId) {
+  let stats = null;
+  try {
+    stats = await loadSingleProjectStats(projectId);
+  } catch {
+    // fall through — if the stats query fails, just try the normal path
+  }
+
+  if (stats && Number(stats.total_files) > LARGE_PROJECT_THRESHOLD) {
+    state.files = [];
+    state.selectedFileIds = new Set();
+    state.activeFilter = null;
+    renderLargeProjectStats(stats);
+    return;
+  }
+
+  state.files = await loadFiles(projectId);
+  state.selectedFileIds = new Set();
+  state.activeFilter = null;
+  renderFileTable();
+}
+
+function renderLargeProjectStats(stats) {
+  renderStats(
+    Number(stats.total_files),
+    Number(stats.missing_from_gcs),
+    Number(stats.not_ingested),
+    Number(stats.not_tested),
+    Number(stats.total_bytes)
+  );
+  el('filter-bar').hidden = true;
+  el('bulk-bar').hidden = true;
+  el('file-table').hidden = true;
+  el('empty-state').hidden = false;
+  el('empty-state').innerHTML = `
+    <p>${Number(stats.total_files).toLocaleString()} files tracked — too many to list individually here.</p>
+    <p class="empty-state-sub">Loading or rendering this many rows would crash the browser tab, so this view shows complete, accurate totals only, computed directly in the database. Sync, Verify ingestion, and auto-copy to GCS all still work normally regardless of scale.</p>
+  `;
+}
+
 async function selectProject(projectId) {
   state.activeProjectId = projectId;
   renderProjectBar();
@@ -303,10 +377,7 @@ async function selectProject(projectId) {
     `  ·  drive folder: ${project.drive_folder_id || 'not set'}` +
     (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '');
 
-  state.files = await loadFiles(projectId);
-  state.selectedFileIds = new Set();
-  state.activeFilter = null;
-  renderFileTable();
+  await loadAndRenderProjectFiles(projectId);
 }
 
 // ---------------- Sync progress dialog ----------------
@@ -403,10 +474,7 @@ el('btn-sync').addEventListener('click', async () => {
 
   try {
     const result = await syncProject(project, token, (event) => handleSyncProgressEvent(event));
-    state.files = await loadFiles(project.id);
-    state.selectedFileIds = new Set();
-    state.activeFilter = null;
-    renderFileTable();
+    await loadAndRenderProjectFiles(project.id);
 
     const copyParts = [];
     if (result.copied) copyParts.push(`${result.copied} copied to GCS`);
@@ -459,10 +527,7 @@ el('btn-verify').addEventListener('click', async () => {
     const result = await verifyIngestion(project, (count) => {
       showSyncStatus(`Checking against the case database — ${count} record(s) read so far…`, false);
     });
-    state.files = await loadFiles(project.id);
-    state.selectedFileIds = new Set();
-    state.activeFilter = null;
-    renderFileTable();
+    await loadAndRenderProjectFiles(project.id);
     const statusSummary = Object.entries(result.statusCounts)
       .map(([status, count]) => `${status}: ${count}`)
       .join(', ');
@@ -567,6 +632,21 @@ async function selectFiletypesProject(projectId) {
   renderFiletypesProjectBar();
   el('filetypes-empty').hidden = true;
   el('filetypes-panel').hidden = false;
+
+  let stats = null;
+  try {
+    stats = await loadSingleProjectStats(projectId);
+  } catch {
+    // fall through — if the stats query fails, just try the normal path
+  }
+  if (stats && Number(stats.total_files) > LARGE_PROJECT_THRESHOLD) {
+    filetypesState.files = [];
+    el('filetypes-panel').hidden = true;
+    el('filetypes-empty').hidden = false;
+    el('filetypes-empty').innerHTML = `<p>${Number(stats.total_files).toLocaleString()} files tracked — too many to break down by type here.</p><p class="empty-state-sub">Loading this many rows would crash the browser tab. Use the Ingestion Tracker's stats for this project instead.</p>`;
+    return;
+  }
+
   try {
     filetypesState.files = await loadFiles(projectId);
   } catch (err) {
@@ -921,10 +1001,7 @@ async function syncAllProjects() {
       // Keep the on-screen table current if this project happens to be the
       // one currently selected.
       if (project.id === state.activeProjectId) {
-        state.files = await loadFiles(project.id);
-        state.selectedFileIds = new Set();
-        state.activeFilter = null;
-        renderFileTable();
+        await loadAndRenderProjectFiles(project.id);
       }
     } catch (err) {
       if (err.isGoogleAuthError) {

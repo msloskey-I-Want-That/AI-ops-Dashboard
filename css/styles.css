@@ -503,6 +503,8 @@ input[type="checkbox"].row-check, #check-all {
 }
 .kpi-label { font-size: 12px; color: var(--text-secondary); margin: 0 0 6px; }
 .kpi-num { font-family: var(--font-mono); font-size: 26px; font-weight: 700; margin: 0; }
+.large-scale-card { border-color: rgba(255, 149, 82, 0.35); background: var(--accent-orange-soft); }
+.large-scale-card .kpi-label:last-child { margin-top: 6px; margin-bottom: 0; }
 
 .legend-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; font-size: 12px; color: var(--text-secondary); }
 .legend-item { display: flex; align-items: center; gap: 6px; }
