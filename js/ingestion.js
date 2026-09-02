@@ -1,6 +1,6 @@
 import { supabase } from './supabase-client.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { listDriveFiles, listGcsObjects } from './google-apis.js';
+import { listDriveFiles, listGcsObjects, downloadDriveFile, uploadToGcsIfAbsent, isGoogleNativeFile } from './google-apis.js';
 
 export async function loadProjects() {
   const { data, error } = await supabase
@@ -111,6 +111,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
 
   const now = new Date().toISOString();
   const byName = new Map();
+  const driveMeta = new Map(); // name -> {id, mimeType} for the copy step below
 
   for (const f of driveFiles) {
     byName.set(f.name, {
@@ -119,6 +120,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
       drive_modified_time: f.modifiedTime || null,
       drive_last_seen_at: now,
     });
+    driveMeta.set(f.name, { id: f.id, mimeType: f.mimeType });
   }
   for (const o of gcsObjects) {
     const existing = byName.get(o.name) || { file_name: o.name };
@@ -130,8 +132,45 @@ export async function syncProject(project, googleAccessToken, onProgress) {
     });
   }
 
+  // Copy step: any file seen in Drive but not in GCS gets uploaded
+  // automatically, straight from Drive's bytes into the project's bucket.
+  const copyResult = { copied: 0, skippedExists: 0, skippedNative: 0, failed: [] };
+  if (project.gcs_bucket_name) {
+    const toCopy = Array.from(byName.entries()).filter(([, row]) => row.drive_last_seen_at && !row.gcs_last_seen_at);
+    const COPY_CONCURRENCY = 4;
+    let cursor = 0;
+    async function copyWorker() {
+      while (cursor < toCopy.length) {
+        const idx = cursor++;
+        const [name, row] = toCopy[idx];
+        const meta = driveMeta.get(name);
+        if (!meta) continue;
+        if (isGoogleNativeFile(meta.mimeType)) {
+          copyResult.skippedNative++;
+          continue;
+        }
+        try {
+          const blob = await downloadDriveFile(meta.id, googleAccessToken);
+          const outcome = await uploadToGcsIfAbsent(project.gcs_bucket_name, name, blob, meta.mimeType, googleAccessToken);
+          if (outcome === 'uploaded') {
+            copyResult.copied++;
+            byName.set(name, { ...row, gcs_object_name: name, gcs_size_bytes: blob.size, gcs_last_seen_at: now });
+          } else {
+            copyResult.skippedExists++;
+            byName.set(name, { ...row, gcs_object_name: name, gcs_last_seen_at: now });
+          }
+        } catch (err) {
+          copyResult.failed.push({ name, message: err.message || String(err) });
+          if (err.isGoogleAuthError) throw err; // stop everything, session's gone
+        }
+        if (onProgress) onProgress(`copy:${idx + 1}/${toCopy.length}`);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(COPY_CONCURRENCY, toCopy.length) }, copyWorker));
+  }
+
   const rows = Array.from(byName.values()).map((r) => ({ ...r, project_id: project.id }));
-  if (rows.length === 0) return { driveCount: 0, gcsCount: 0 };
+  if (rows.length === 0) return { driveCount: 0, gcsCount: 0, ...copyResult };
 
   // Supabase caps a single write at ~1000 rows and silently truncates rather
   // than erroring, so large projects (thousands of GCS objects) need batching.
@@ -145,7 +184,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
     if (onProgress) onProgress(Math.min(i + SYNC_CHUNK_SIZE, rows.length), rows.length);
   }
 
-  return { driveCount: driveFiles.length, gcsCount: gcsObjects.length };
+  return { driveCount: driveFiles.length, gcsCount: gcsObjects.length, ...copyResult };
 }
 
 // Derives the pipeline stage for a file row, for rendering.

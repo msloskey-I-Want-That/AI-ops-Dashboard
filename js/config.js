@@ -3,7 +3,8 @@
 export const SUPABASE_URL = 'https://izgkopvrwhetqaomejns.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_6BPbiblpkNBAl-F5IvBBwA_D8Q_1adT';
 
-// Google OAuth scopes requested at sign-in. Read-only by design — this app never
-// writes to Drive or GCS, it only lists files to compare against Supabase state.
+// Google OAuth scopes requested at sign-in. Drive stays read-only — this app
+// never writes to Drive. Cloud Storage is read-write: Sync can now copy
+// Drive-only files into GCS automatically, in addition to just reading.
 export const GOOGLE_OAUTH_SCOPES =
-  'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/devstorage.read_only';
+  'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/devstorage.read_write';

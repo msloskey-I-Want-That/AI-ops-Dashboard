@@ -44,6 +44,7 @@ export async function listDriveFiles(rootFolderId, accessToken) {
         name: pathPrefix ? `${pathPrefix}/${item.name}` : item.name,
         modifiedTime: item.modifiedTime,
         size: item.size,
+        mimeType: item.mimeType,
       });
     }
 
@@ -83,6 +84,47 @@ export async function listGcsObjects(bucketName, accessToken) {
   return objects;
 }
 
+const GOOGLE_NATIVE_MIME_PREFIX = 'application/vnd.google-apps.';
+
+// Downloads a regular (non-Google-native) Drive file's raw content. Google
+// Docs/Sheets/Slides have no raw bytes to download this way — callers should
+// check mimeType and skip those (or export them, a separate feature) before
+// calling this.
+export async function downloadDriveFile(fileId, accessToken) {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw await googleApiError(res, 'Drive download');
+  return res.blob();
+}
+
+export function isGoogleNativeFile(mimeType) {
+  return typeof mimeType === 'string' && mimeType.startsWith(GOOGLE_NATIVE_MIME_PREFIX);
+}
+
+// Uploads a file to GCS, but only if no object already exists at that name
+// (ifGenerationMatch=0 makes this atomic and race-condition-safe — the
+// upload itself fails with 412 rather than needing a separate existence
+// check first). Returns 'uploaded' or 'skipped-exists'.
+export async function uploadToGcsIfAbsent(bucketName, objectName, blob, contentType, accessToken) {
+  const params = new URLSearchParams({
+    uploadType: 'media',
+    name: objectName,
+    ifGenerationMatch: '0',
+  });
+  const res = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucketName)}/o?${params}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': contentType || 'application/octet-stream',
+    },
+    body: blob,
+  });
+  if (res.status === 412) return 'skipped-exists';
+  if (!res.ok) throw await googleApiError(res, 'Cloud Storage upload');
+  return 'uploaded';
+}
+
 async function googleApiError(res, apiName) {
   let detail = '';
   try {
@@ -97,7 +139,11 @@ async function googleApiError(res, apiName) {
     return err;
   }
   if (res.status === 403) {
-    return new Error(`${apiName}: access denied${detail ? ` (${detail})` : ''}. Check you have permission on this resource.`);
+    const err = new Error(
+      `${apiName}: access denied${detail ? ` (${detail})` : ''}. This can mean you don't have permission on this resource, or — if this just started happening — your Google session predates a permission change and needs to be refreshed. Try Reconnect Google.`
+    );
+    err.isGoogleAuthError = true;
+    return err;
   }
   if (res.status === 404) {
     return new Error(`${apiName}: not found${detail ? ` (${detail})` : ''}. Check the folder ID / bucket name is correct.`);

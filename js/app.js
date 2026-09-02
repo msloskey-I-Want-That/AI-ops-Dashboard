@@ -336,14 +336,30 @@ el('btn-sync').addEventListener('click', async () => {
   showSyncStatus('Pulling current state from Drive and Cloud Storage…', false);
 
   try {
-    const result = await syncProject(project, token, (done, total) => {
-      if (total > 500) showSyncStatus(`Saving ${done}/${total} file records…`, false);
+    const result = await syncProject(project, token, (a, b) => {
+      if (typeof a === 'string' && a.startsWith('copy:')) {
+        showSyncStatus(`Copying missing files to GCS — ${a.slice(5)}…`, false);
+      } else if (b > 500) {
+        showSyncStatus(`Saving ${a}/${b} file records…`, false);
+      }
     });
     state.files = await loadFiles(project.id);
     state.selectedFileIds = new Set();
     state.activeFilter = null;
     renderFileTable();
-    showSyncStatus(`Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.`, false, true);
+
+    const copyParts = [];
+    if (result.copied) copyParts.push(`${result.copied} copied to GCS`);
+    if (result.skippedExists) copyParts.push(`${result.skippedExists} already existed`);
+    if (result.skippedNative) copyParts.push(`${result.skippedNative} skipped (native Google Docs)`);
+    if (result.failed && result.failed.length) copyParts.push(`${result.failed.length} failed`);
+    const copySummary = copyParts.length ? ` — ${copyParts.join(', ')}.` : '';
+
+    showSyncStatus(
+      `Synced — ${result.driveCount} file(s) in Drive, ${result.gcsCount} object(s) in GCS.${copySummary}`,
+      result.failed && result.failed.length > 0,
+      !(result.failed && result.failed.length > 0)
+    );
   } catch (err) {
     if (err.isGoogleAuthError) {
       clearGoogleToken();
@@ -822,15 +838,22 @@ async function syncAllProjects() {
   statusBox.classList.remove('is-error', 'is-success');
 
   const failures = [];
+  const copyNotes = [];
   for (let i = 0; i < eligible.length; i++) {
     const project = eligible[i];
     statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name}…`;
     try {
-      await syncProject(project, token, (done, total) => {
-        if (total > 500) {
-          statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name} — saving ${done}/${total}…`;
+      const result = await syncProject(project, token, (a, b) => {
+        if (typeof a === 'string' && a.startsWith('copy:')) {
+          statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name} — copying ${a.slice(5)}…`;
+        } else if (b > 500) {
+          statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name} — saving ${a}/${b}…`;
         }
       });
+      if (result.copied) copyNotes.push(`${project.display_name}: ${result.copied} copied to GCS`);
+      if (result.failed && result.failed.length) {
+        failures.push({ name: project.display_name, message: `${result.failed.length} file copy failure(s)` });
+      }
       // Keep the on-screen table current if this project happens to be the
       // one currently selected.
       if (project.id === state.activeProjectId) {
@@ -861,14 +884,15 @@ async function syncAllProjects() {
 
   btn.disabled = false;
   const skippedNote = skipped.length ? ` (${skipped.length} skipped — no Drive folder/bucket set: ${skipped.map((p) => p.display_name).join(', ')})` : '';
+  const copyNote = copyNotes.length ? ` ${copyNotes.join('; ')}.` : '';
   if (failures.length === 0) {
     statusBox.classList.remove('is-error');
     statusBox.classList.add('is-success');
-    statusBox.textContent = `Synced ${eligible.length} project(s).${skippedNote}`;
+    statusBox.textContent = `Synced ${eligible.length} project(s).${copyNote}${skippedNote}`;
   } else {
     statusBox.classList.add('is-error');
     statusBox.classList.remove('is-success');
-    statusBox.textContent = `Synced ${eligible.length - failures.length}/${eligible.length} project(s). Failed: ${failures.map((f) => `${f.name} (${f.message})`).join('; ')}${skippedNote}`;
+    statusBox.textContent = `Synced ${eligible.length - failures.length}/${eligible.length} project(s). Failed: ${failures.map((f) => `${f.name} (${f.message})`).join('; ')}${copyNote}${skippedNote}`;
   }
 }
 el('btn-add-project').addEventListener('click', () => openProjectDialog(null));

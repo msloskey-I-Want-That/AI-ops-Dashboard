@@ -9,11 +9,17 @@ Live: https://msloskey-i-want-that.github.io/AI-ops-Dashboard/
 Tracks the pipeline for each data project: **Drive (shared folder) → GCS bucket → Supabase (ingested + tested)**.
 
 - Drive folder contents and GCS bucket contents are listed **live**, client-side, using your own Google
-  sign-in (read-only scopes: `drive.readonly`, `devstorage.read_only`). No service account keys are
-  embedded in the app. Drive folders are walked **recursively** — subfolders are traversed, not
-  treated as files — and each file's tracked name is its path relative to the project's root folder
-  (e.g. `Files/LEVO/02. February/statement.xlsx`), matching how the corresponding GCS objects are
-  already named after a folder-structured upload.
+  sign-in (`drive.readonly`, `devstorage.read_write` scopes). Drive folders are walked **recursively** —
+  subfolders are traversed, not treated as files — and each file's tracked name is its path relative to
+  the project's root folder (e.g. `Files/LEVO/02. February/statement.xlsx`), matching how the
+  corresponding GCS objects are already named after a folder-structured upload.
+- **Sync automatically copies any file found in Drive but missing from GCS straight into the bucket** —
+  downloaded from Drive and uploaded to GCS entirely client-side, no server involved. Uses
+  `ifGenerationMatch=0` so it's a no-op (skipped, not overwritten) if something with that name already
+  exists — safe to re-run. Native Google Docs/Sheets/Slides (no raw bytes to copy) are skipped and
+  counted separately, since copying those would need export-to-format logic instead, a separate
+  feature. This is the one place in the app that writes to your real cloud storage rather than just
+  reading it.
 - Ingested/tested status is stored in Supabase — these are steps you perform yourself (running the
   ingestion script, testing it), so the app just lets you check them off per file.
 - Each file's status is reconciled by relative path across all three stages, with clear flags for files
