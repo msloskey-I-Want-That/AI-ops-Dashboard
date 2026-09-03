@@ -745,10 +745,10 @@ function renderFiletypesTable() {
       <td class="file-name">${escapeHtml(file.file_name)}</td>
       <td class="mono">${escapeHtml(getFileExtension(file.file_name))}</td>
       <td class="mono">${formatBytes(file.gcs_size_bytes)}</td>
-      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing')}</td>
-      <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing')}</td>
-      <td>${pillHtml(ingested, ingested ? 'yes' : 'no')}</td>
-      <td>${pillHtml(tested, tested ? 'yes' : 'no')}</td>
+      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing', inDrive ? formatDate(file.drive_modified_time) : '')}</td>
+      <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing', inGcs ? formatDate(file.gcs_last_seen_at) : '')}</td>
+      <td>${pillHtml(ingested, ingested ? 'yes' : 'no', ingested ? formatDate(file.ingested_at) : '')}</td>
+      <td>${pillHtml(tested, tested ? 'yes' : 'no', tested ? formatDate(file.tested_at) : '')}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -785,8 +785,8 @@ function renderFileTable() {
       <td></td>
       <td class="file-name">${escapeHtml(file.file_name)}</td>
       <td>${pipelineHtml(inDrive, inGcs, ingested, tested)}</td>
-      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing')}</td>
-      <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing')}</td>
+      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing', inDrive ? formatDate(file.drive_modified_time) : '')}</td>
+      <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing', inGcs ? formatDate(file.gcs_last_seen_at) : '')}</td>
       <td></td>
       <td></td>
     `;
@@ -806,6 +806,12 @@ function renderFileTable() {
     const ingestedCell = tr.children[5];
     const testedCell = tr.children[6];
     ingestedCell.appendChild(toggleButton(ingested, 'Ingested', () => toggleStatus(file, 'ingested', !ingested)));
+    if (ingested && file.ingested_at) {
+      const dateSpan = document.createElement('div');
+      dateSpan.className = 'cell-date mono';
+      dateSpan.textContent = formatDate(file.ingested_at);
+      ingestedCell.appendChild(dateSpan);
+    }
     if (file.verified_ingested_at) {
       const badge = document.createElement('span');
       badge.className = 'verified-badge';
@@ -814,6 +820,12 @@ function renderFileTable() {
       ingestedCell.appendChild(badge);
     }
     testedCell.appendChild(toggleButton(tested, 'Tested', () => toggleStatus(file, 'tested', !tested), !ingested));
+    if (tested && file.tested_at) {
+      const dateSpan = document.createElement('div');
+      dateSpan.className = 'cell-date mono';
+      dateSpan.textContent = formatDate(file.tested_at);
+      testedCell.appendChild(dateSpan);
+    }
     tbody.appendChild(tr);
   }
 
@@ -935,8 +947,9 @@ function pipelineHtml(inDrive, inGcs, ingested, tested) {
   </span>`;
 }
 
-function pillHtml(on, label) {
-  return `<span class="status-pill ${on ? 'is-on' : ''}"><span class="status-dot"></span>${label}</span>`;
+function pillHtml(on, label, dateStr) {
+  const dateHtml = dateStr ? `<div class="cell-date mono">${escapeHtml(dateStr)}</div>` : '';
+  return `<div><span class="status-pill ${on ? 'is-on' : ''}"><span class="status-dot"></span>${label}</span>${dateHtml}</div>`;
 }
 
 function toggleButton(on, label, onClick, disabled) {
@@ -1127,6 +1140,11 @@ el('project-form').addEventListener('submit', async (e) => {
 });
 
 // ---------------- Utils ----------------
+
+function formatDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-US', { year: '2-digit', month: 'numeric', day: 'numeric' });
+}
 
 function escapeHtml(str) {
   const div = document.createElement('div');
