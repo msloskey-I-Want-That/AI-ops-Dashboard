@@ -24,6 +24,8 @@ let state = {
   editingProjectId: null, // set when the dialog is open in "edit" mode
   selectedFileIds: new Set(),
   activeFilter: null, // null | 'missingFromGcs' | 'notIngested' | 'notTested'
+  sortColumn: 'file_name',
+  sortDirection: 'asc',
 };
 
 const FILTER_LABELS = {
@@ -42,7 +44,20 @@ function matchesFilter(file, filterKey) {
 }
 
 function getVisibleFiles() {
-  return state.files.filter((f) => matchesFilter(f, state.activeFilter));
+  const filtered = state.files.filter((f) => matchesFilter(f, state.activeFilter));
+  const { sortColumn, sortDirection } = state;
+  const dir = sortDirection === 'desc' ? -1 : 1;
+  return [...filtered].sort((a, b) => {
+    const av = a[sortColumn];
+    const bv = b[sortColumn];
+    // Nulls always sort last regardless of direction — an empty date isn't
+    // meaningfully "earliest" or "latest", it's just not there yet.
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (sortColumn === 'file_name') return av.localeCompare(bv) * dir;
+    return (new Date(av) - new Date(bv)) * dir;
+  });
 }
 
 // ---------------- Auth wiring ----------------
@@ -378,6 +393,28 @@ async function selectProject(projectId) {
     (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '');
 
   await loadAndRenderProjectFiles(projectId);
+}
+
+document.querySelectorAll('#file-table thead th.sortable').forEach((th) => {
+  th.addEventListener('click', () => {
+    const column = th.dataset.sort;
+    if (state.sortColumn === column) {
+      state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sortColumn = column;
+      state.sortDirection = 'asc';
+    }
+    renderFileTable();
+  });
+});
+
+function renderSortHeaders() {
+  document.querySelectorAll('#file-table thead th.sortable').forEach((th) => {
+    const isActive = th.dataset.sort === state.sortColumn;
+    th.classList.toggle('is-active', isActive);
+    th.classList.toggle('is-asc', isActive && state.sortDirection === 'asc');
+    th.classList.toggle('is-desc', isActive && state.sortDirection === 'desc');
+  });
 }
 
 // ---------------- Sync progress dialog ----------------
@@ -720,6 +757,7 @@ function renderFiletypesTable() {
 function renderFileTable() {
   const tbody = el('file-table-body');
   tbody.innerHTML = '';
+  renderSortHeaders();
 
   const visible = getVisibleFiles();
   el('empty-state').hidden = visible.length > 0;

@@ -371,6 +371,12 @@ input[type="checkbox"].row-check, #check-all {
   border-bottom: 1px solid var(--glass-border);
   font-weight: 620;
 }
+.file-table thead th.sortable { cursor: pointer; user-select: none; }
+.file-table thead th.sortable:hover { color: var(--text-secondary); }
+.file-table thead th.sortable.is-active { color: var(--accent-lime); }
+.file-table thead th.sortable::after { content: ''; margin-left: 4px; }
+.file-table thead th.sortable.is-active.is-asc::after { content: '↑'; }
+.file-table thead th.sortable.is-active.is-desc::after { content: '↓'; }
 .file-table tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.055); transition: background 0.12s var(--ease-glass); }
 .file-table tbody tr:last-child { border-bottom: none; }
 .file-table tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
