@@ -179,7 +179,10 @@ export async function syncProject(project, googleAccessToken, onProgress) {
   }
 
   const rows = Array.from(byName.values()).map((r) => ({ ...r, project_id: project.id }));
-  if (rows.length === 0) return { driveCount: 0, gcsCount: 0, ...copyResult };
+  if (rows.length === 0) {
+    await supabase.from('ingestion_projects').update({ last_synced_at: now }).eq('id', project.id);
+    return { driveCount: 0, gcsCount: 0, syncedAt: now, ...copyResult };
+  }
 
   // Supabase caps a single write at ~1000 rows and silently truncates rather
   // than erroring, so large projects (thousands of GCS objects) need batching.
@@ -194,7 +197,11 @@ export async function syncProject(project, googleAccessToken, onProgress) {
     emit({ phase: 'save', done: Math.min(i + SYNC_CHUNK_SIZE, rows.length), total: rows.length });
   }
 
-  return { driveCount: driveFiles.length, gcsCount: gcsObjects.length, ...copyResult };
+  // Stamp when this sync completed, so next time (this session or a future
+  // one) we can show what's arrived in Drive since this exact point.
+  await supabase.from('ingestion_projects').update({ last_synced_at: now }).eq('id', project.id);
+
+  return { driveCount: driveFiles.length, gcsCount: gcsObjects.length, syncedAt: now, ...copyResult };
 }
 
 // Derives the pipeline stage for a file row, for rendering.

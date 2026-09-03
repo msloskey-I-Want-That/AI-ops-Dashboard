@@ -26,12 +26,14 @@ let state = {
   activeFilter: null, // null | 'missingFromGcs' | 'notIngested' | 'notTested'
   sortColumn: 'file_name',
   sortDirection: 'asc',
+  priorSyncAt: null, // this project's last_synced_at as of when it was opened — the baseline for "new since last sync"
 };
 
 const FILTER_LABELS = {
   missingFromGcs: 'in Drive, missing from GCS',
   notIngested: 'in GCS, not ingested',
   notTested: 'ingested, not tested',
+  newSinceSync: 'new in Drive since last sync',
 };
 
 function matchesFilter(file, filterKey) {
@@ -40,7 +42,12 @@ function matchesFilter(file, filterKey) {
   if (filterKey === 'missingFromGcs') return inDrive && !inGcs;
   if (filterKey === 'notIngested') return inGcs && !ingested;
   if (filterKey === 'notTested') return ingested && !tested;
+  if (filterKey === 'newSinceSync') return isNewSinceSync(file);
   return true;
+}
+
+function isNewSinceSync(file) {
+  return !!(file.drive_created_time && state.priorSyncAt && new Date(file.drive_created_time) > new Date(state.priorSyncAt));
 }
 
 function getVisibleFiles() {
@@ -392,6 +399,12 @@ async function selectProject(projectId) {
     `  ·  drive folder: ${project.drive_folder_id || 'not set'}` +
     (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '');
 
+  // Captured now, before any sync in this viewing session can move it —
+  // this is the baseline "new since last sync" compares against, so it
+  // stays meaningful even if you sync a few times while looking at this
+  // project, rather than resetting to ~0 immediately after each sync.
+  state.priorSyncAt = project.last_synced_at || null;
+
   await loadAndRenderProjectFiles(projectId);
 }
 
@@ -511,6 +524,7 @@ el('btn-sync').addEventListener('click', async () => {
 
   try {
     const result = await syncProject(project, token, (event) => handleSyncProgressEvent(event));
+    if (result.syncedAt) project.last_synced_at = result.syncedAt;
     await loadAndRenderProjectFiles(project.id);
 
     const copyParts = [];
@@ -767,6 +781,7 @@ function renderFileTable() {
   let notIngested = 0;
   let notTested = 0;
   let totalBytes = 0;
+  let newSinceSync = 0;
 
   // Stats always reflect the whole project, regardless of the active filter.
   for (const file of state.files) {
@@ -774,6 +789,7 @@ function renderFileTable() {
     if (inDrive && !inGcs) missingFromGcs++;
     if (inGcs && !ingested) notIngested++;
     if (ingested && !tested) notTested++;
+    if (isNewSinceSync(file)) newSinceSync++;
     totalBytes += Number(file.gcs_size_bytes) || 0;
   }
 
@@ -829,7 +845,7 @@ function renderFileTable() {
     tbody.appendChild(tr);
   }
 
-  renderStats(state.files.length, missingFromGcs, notIngested, notTested, totalBytes);
+  renderStats(state.files.length, missingFromGcs, notIngested, notTested, totalBytes, newSinceSync);
   renderFilterBar();
   renderBulkBar();
   syncCheckAllState();
@@ -975,7 +991,7 @@ async function toggleStatus(file, stage, on) {
   }
 }
 
-function renderStats(total, missingFromGcs, notIngested, notTested, totalBytes) {
+function renderStats(total, missingFromGcs, notIngested, notTested, totalBytes, newSinceSync) {
   const row = el('stat-row');
   row.innerHTML = '';
 
@@ -998,6 +1014,9 @@ function renderStats(total, missingFromGcs, notIngested, notTested, totalBytes) 
   row.appendChild(makeStat(missingFromGcs, 'in Drive, missing from GCS', true, 'missingFromGcs'));
   row.appendChild(makeStat(notIngested, 'in GCS, not ingested', true, 'notIngested'));
   row.appendChild(makeStat(notTested, 'ingested, not tested', true, 'notTested'));
+  if (state.priorSyncAt && newSinceSync !== undefined) {
+    row.appendChild(makeStat(newSinceSync, `new in Drive since ${formatDate(state.priorSyncAt)}`, true, 'newSinceSync'));
+  }
 }
 
 // ---------------- Add / edit project dialog ----------------
@@ -1046,6 +1065,7 @@ async function syncAllProjects() {
     const prefix = `[${i + 1}/${eligible.length}] ${project.display_name}: `;
     try {
       const result = await syncProject(project, token, (event) => handleSyncProgressEvent(event, prefix));
+      if (result.syncedAt) project.last_synced_at = result.syncedAt;
       if (result.copied) copyNotes.push(`${project.display_name}: ${result.copied} copied to GCS`);
       if (result.failed && result.failed.length) {
         failures.push({ name: project.display_name, message: `${result.failed.length} file copy failure(s)` });

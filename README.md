@@ -39,7 +39,20 @@ Tracks the pipeline for each data project: **Drive (shared folder) → GCS bucke
 - **Google APIs**: called directly from the browser (`js/google-apis.js`) — Drive API v3 for folder
   listings, Cloud Storage JSON API for bucket listings.
 
+- Each project tracks when it was last synced (`last_synced_at`). Opening a project shows a
+  **"new in Drive since [date]"** stat — files whose real Drive upload date is after that
+  timestamp — clickable to filter the table down to just those, same as the other flagged stats.
+  This baseline is captured once per viewing session (when you open the project), so it stays
+  meaningful even across a few syncs in the same sitting rather than resetting to ~0 immediately
+  after each one.
+
 ## Known limitations / future improvements
+
+- **No proactive alerts yet.** This app is entirely client-side — it can only see Drive/GCS state
+  at the moment someone opens it and syncs. A true "email/Slack me the moment staff adds a file"
+  notification would need a separate backend piece (a scheduled job running on Google's
+  infrastructure, checking periodically) — a genuinely different piece of infrastructure, not an
+  extension of the current architecture.
 
 - Sync matches Drive files to GCS objects **by relative path** (folder structure
   included, e.g. `Files/LEVO/02. February/statement.xlsx`). If a file gets
