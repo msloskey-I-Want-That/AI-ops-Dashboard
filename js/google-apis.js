@@ -13,7 +13,7 @@ export async function listDriveFiles(rootFolderId, accessToken) {
     do {
       const params = new URLSearchParams({
         q: `'${folderId}' in parents and trashed = false`,
-        fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, size)',
+        fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, createdTime, size)',
         pageSize: '1000',
         supportsAllDrives: 'true',
         includeItemsFromAllDrives: 'true',
@@ -43,6 +43,7 @@ export async function listDriveFiles(rootFolderId, accessToken) {
         id: item.id,
         name: pathPrefix ? `${pathPrefix}/${item.name}` : item.name,
         modifiedTime: item.modifiedTime,
+        createdTime: item.createdTime,
         size: item.size,
         mimeType: item.mimeType,
       });

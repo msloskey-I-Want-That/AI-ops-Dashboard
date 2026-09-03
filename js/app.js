@@ -745,7 +745,7 @@ function renderFiletypesTable() {
       <td class="file-name">${escapeHtml(file.file_name)}</td>
       <td class="mono">${escapeHtml(getFileExtension(file.file_name))}</td>
       <td class="mono">${formatBytes(file.gcs_size_bytes)}</td>
-      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing', inDrive ? formatDate(file.drive_modified_time) : '')}</td>
+      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing', inDrive ? formatDate(file.drive_created_time) : '', inDrive && file.drive_modified_time ? `Modified ${formatDate(file.drive_modified_time)}` : '')}</td>
       <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing', inGcs ? formatDate(file.gcs_last_seen_at) : '')}</td>
       <td>${pillHtml(ingested, ingested ? 'yes' : 'no', ingested ? formatDate(file.ingested_at) : '')}</td>
       <td>${pillHtml(tested, tested ? 'yes' : 'no', tested ? formatDate(file.tested_at) : '')}</td>
@@ -785,7 +785,7 @@ function renderFileTable() {
       <td></td>
       <td class="file-name">${escapeHtml(file.file_name)}</td>
       <td>${pipelineHtml(inDrive, inGcs, ingested, tested)}</td>
-      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing', inDrive ? formatDate(file.drive_modified_time) : '')}</td>
+      <td>${pillHtml(inDrive, inDrive ? 'seen' : 'missing', inDrive ? formatDate(file.drive_created_time) : '', inDrive && file.drive_modified_time ? `Modified ${formatDate(file.drive_modified_time)}` : '')}</td>
       <td>${pillHtml(inGcs, inGcs ? 'seen' : 'missing', inGcs ? formatDate(file.gcs_last_seen_at) : '')}</td>
       <td></td>
       <td></td>
@@ -947,9 +947,10 @@ function pipelineHtml(inDrive, inGcs, ingested, tested) {
   </span>`;
 }
 
-function pillHtml(on, label, dateStr) {
+function pillHtml(on, label, dateStr, titleStr) {
   const dateHtml = dateStr ? `<div class="cell-date mono">${escapeHtml(dateStr)}</div>` : '';
-  return `<div><span class="status-pill ${on ? 'is-on' : ''}"><span class="status-dot"></span>${label}</span>${dateHtml}</div>`;
+  const titleAttr = titleStr ? ` title="${escapeHtml(titleStr)}"` : '';
+  return `<div${titleAttr}><span class="status-pill ${on ? 'is-on' : ''}"><span class="status-dot"></span>${label}</span>${dateHtml}</div>`;
 }
 
 function toggleButton(on, label, onClick, disabled) {

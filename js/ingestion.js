@@ -122,6 +122,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
       file_name: f.name,
       drive_file_id: f.id,
       drive_modified_time: f.modifiedTime || null,
+      drive_created_time: f.createdTime || null,
       drive_last_seen_at: now,
     });
     driveMeta.set(f.name, { id: f.id, mimeType: f.mimeType });
