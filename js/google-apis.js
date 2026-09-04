@@ -126,6 +126,16 @@ export async function uploadToGcsIfAbsent(bucketName, objectName, blob, contentT
   return 'uploaded';
 }
 
+// Downloads a single object's raw bytes from GCS.
+export async function downloadFromGcs(bucketName, objectName, accessToken) {
+  const res = await fetch(
+    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectName)}?alt=media`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw await googleApiError(res, 'Cloud Storage download');
+  return res.blob();
+}
+
 async function googleApiError(res, apiName) {
   let detail = '';
   try {

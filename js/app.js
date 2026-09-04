@@ -12,6 +12,8 @@ import {
   loadProgressOverview,
   loadSingleProjectStats,
   verifyIngestion,
+  downloadProjectAsZip,
+  DOWNLOAD_ZIP_MAX_BYTES,
 } from './ingestion.js';
 
 const el = (id) => document.getElementById(id);
@@ -592,6 +594,91 @@ el('btn-verify').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Verify ingestion';
+  }
+});
+
+el('btn-download-all').addEventListener('click', async () => {
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  if (!project) return;
+
+  let stats;
+  try {
+    stats = await loadSingleProjectStats(project.id);
+  } catch (err) {
+    showSyncStatus(err.message || 'Could not check project size.', true);
+    return;
+  }
+
+  if (!stats || Number(stats.total_bytes) === 0) {
+    showSyncStatus('Nothing to download yet — sync this project first.', true);
+    return;
+  }
+
+  if (Number(stats.total_bytes) > DOWNLOAD_ZIP_MAX_BYTES) {
+    showSyncStatus(
+      `This project is ${formatBytes(stats.total_bytes)} — too large to zip in the browser (limit ~2GB). Use the gcloud/gsutil command-line method for this one instead.`,
+      true
+    );
+    return;
+  }
+
+  const token = getCachedGoogleToken();
+  if (!token) {
+    showSyncStatusWithAction(
+      'Your Google session for Drive/Cloud Storage has expired. ',
+      'Reconnect Google',
+      () => signInWithGoogle()
+    );
+    return;
+  }
+
+  // Files with actual GCS objects — use the already-loaded list if this
+  // project is small enough to have one; otherwise (shouldn't normally
+  // happen given the size check above, but just in case) load it fresh.
+  const files = state.files.length > 0 && state.activeProjectId === project.id ? state.files : await loadFiles(project.id);
+
+  const btn = el('btn-download-all');
+  btn.disabled = true;
+  btn.textContent = 'Preparing…';
+  openProgressDialog(`Downloading ${project.display_name}`);
+
+  try {
+    const result = await downloadProjectAsZip(project, files, token, (event) => {
+      if (event.phase === 'download') {
+        setProgressPhase(`Downloading files — ${event.index}/${event.total}`);
+        setProgressBar((event.index / event.total) * 50); // downloads are the first half of the bar
+        appendProgressLog(event.name);
+      } else if (event.phase === 'compress') {
+        setProgressPhase(event.percent != null ? `Compressing — ${Math.round(event.percent)}%` : 'Compressing…');
+        if (event.percent != null) setProgressBar(50 + event.percent / 2); // second half of the bar
+      }
+    });
+
+    const url = URL.createObjectURL(result.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${project.slug || project.display_name}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setProgressPhase('Done — download started.');
+    setProgressBar(100);
+    const failNote = result.failed.length ? ` (${result.failed.length} file(s) failed and were skipped)` : '';
+    appendProgressLog(`Zipped ${result.fileCount} file(s)${failNote}.`, result.failed.length ? 'failed' : 'copied');
+    showSyncStatus(`Downloaded ${result.fileCount} file(s) as a ZIP.${failNote}`, result.failed.length > 0, result.failed.length === 0);
+  } catch (err) {
+    if (err.isGoogleAuthError) {
+      showSyncStatusWithAction(err.message + ' ', 'Reconnect Google', () => signInWithGoogle());
+    } else {
+      showSyncStatus(err.message || 'Download failed.', true);
+    }
+    appendProgressLog(err.message || 'Download failed.', 'failed');
+    setProgressPhase('Failed.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Download all (ZIP)';
   }
 });
 

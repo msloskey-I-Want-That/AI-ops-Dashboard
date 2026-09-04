@@ -1,6 +1,6 @@
 import { supabase } from './supabase-client.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { listDriveFiles, listGcsObjects, downloadDriveFile, uploadToGcsIfAbsent, isGoogleNativeFile } from './google-apis.js';
+import { listDriveFiles, listGcsObjects, downloadDriveFile, uploadToGcsIfAbsent, downloadFromGcs, isGoogleNativeFile } from './google-apis.js';
 
 export async function loadProjects() {
   const { data, error } = await supabase
@@ -202,6 +202,47 @@ export async function syncProject(project, googleAccessToken, onProgress) {
   await supabase.from('ingestion_projects').update({ last_synced_at: now }).eq('id', project.id);
 
   return { driveCount: driveFiles.length, gcsCount: gcsObjects.length, syncedAt: now, ...copyResult };
+}
+
+// Size ceiling for the in-browser ZIP download — above this, a browser tab
+// realistically can't hold and compress the data (same underlying reason
+// LARGE_PROJECT_THRESHOLD exists for the file table). Use the gcloud/gsutil
+// CLI instead for anything bigger.
+export const DOWNLOAD_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+
+// Downloads every GCS-present file for a project and builds a ZIP client-side,
+// preserving folder structure (file_name already contains '/' separators).
+// Returns the ZIP as a Blob — caller is responsible for triggering the
+// actual browser download.
+export async function downloadProjectAsZip(project, files, accessToken, onProgress) {
+  const zip = new window.JSZip();
+  const toDownload = files.filter((f) => f.gcs_object_name);
+  const DOWNLOAD_CONCURRENCY = 4;
+  const failed = [];
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < toDownload.length) {
+      const idx = cursor++;
+      const file = toDownload[idx];
+      try {
+        const blob = await downloadFromGcs(project.gcs_bucket_name, file.gcs_object_name, accessToken);
+        zip.file(file.file_name, blob);
+      } catch (err) {
+        failed.push({ name: file.file_name, message: err.message || String(err) });
+        if (err.isGoogleAuthError) throw err;
+      }
+      if (onProgress) onProgress({ phase: 'download', index: idx + 1, total: toDownload.length, name: file.file_name });
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(DOWNLOAD_CONCURRENCY, toDownload.length) }, worker));
+
+  if (onProgress) onProgress({ phase: 'compress' });
+  const blob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+    if (onProgress) onProgress({ phase: 'compress', percent: metadata.percent });
+  });
+
+  return { blob, failed, fileCount: toDownload.length - failed.length };
 }
 
 // Derives the pipeline stage for a file row, for rendering.
