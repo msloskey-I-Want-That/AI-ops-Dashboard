@@ -288,17 +288,21 @@ export async function verifyIngestion(project, onProgress) {
   const statusCol = project.verify_status_column || 'ingestion_status';
   const successValue = project.verify_success_value || 'indexed';
   const prefix = project.verify_path_prefix ?? `${project.gcs_bucket_name}/`;
+  const matchMode = project.verify_match_mode || 'path'; // 'path' or 'filename'
 
   // Pull every row's path + status from the external table, paginated the
   // same way our own reads are (same underlying Supabase row cap applies).
+  // Filtered to this project's own case if the table is shared across
+  // multiple matters/investigations (verify_filter_column/value).
   const PAGE_SIZE = 1000;
   const externalRows = [];
   let from = 0;
   while (true) {
-    const { data, error } = await externalClient
-      .from(table)
-      .select(`${pathCol}, ${statusCol}`)
-      .range(from, from + PAGE_SIZE - 1);
+    let query = externalClient.from(table).select(`${pathCol}, ${statusCol}`);
+    if (project.verify_filter_column && project.verify_filter_value) {
+      query = query.eq(project.verify_filter_column, project.verify_filter_value);
+    }
+    const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(`External database error: ${error.message}`);
     externalRows.push(...data);
     if (onProgress) onProgress(externalRows.length);
@@ -306,10 +310,14 @@ export async function verifyIngestion(project, onProgress) {
     from += PAGE_SIZE;
   }
 
+  const extractKey = (rawPath) => {
+    if (!rawPath) return rawPath;
+    if (matchMode === 'filename') return rawPath.split('/').pop();
+    return rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath;
+  };
+
   const verifiedPaths = new Set(
-    externalRows
-      .filter((r) => r[statusCol] === successValue)
-      .map((r) => (r[pathCol] || '').startsWith(prefix) ? r[pathCol].slice(prefix.length) : r[pathCol])
+    externalRows.filter((r) => r[statusCol] === successValue).map((r) => extractKey(r[pathCol]))
   );
 
   const statusCounts = {};
@@ -320,7 +328,8 @@ export async function verifyIngestion(project, onProgress) {
 
   const files = await loadFiles(project.id);
   const now = new Date().toISOString();
-  const toVerify = files.filter((f) => verifiedPaths.has(f.file_name) && !f.verified_ingested_at);
+  const fileKey = (f) => (matchMode === 'filename' ? f.file_name.split('/').pop() : f.file_name);
+  const toVerify = files.filter((f) => verifiedPaths.has(fileKey(f)) && !f.verified_ingested_at);
 
   const UPDATE_CHUNK = 40;
   for (let i = 0; i < toVerify.length; i += UPDATE_CHUNK) {
