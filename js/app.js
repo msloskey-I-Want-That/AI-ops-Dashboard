@@ -14,6 +14,7 @@ import {
   verifyIngestion,
   downloadProjectAsZip,
   DOWNLOAD_ZIP_MAX_BYTES,
+  setManualCompletion,
 } from './ingestion.js';
 
 const el = (id) => document.getElementById(id);
@@ -338,14 +339,19 @@ async function refreshProjectProgress() {
   renderProjectBar();
   if (state.activeProjectId) {
     el('project-complete-badge').hidden = !isProjectComplete(state.projectProgress.get(state.activeProjectId));
+    renderMarkCompleteButton(state.activeProjectId);
   }
 }
 
 // A project is "complete" once every tracked file has cleared its
 // strongest available confirmation signal: verified + tested where a case
 // database is connected, or ingested + tested (self-reported) otherwise.
+// A manual override (for work confirmed offline — e.g. projects too large
+// to browse file-by-file in this app) takes precedence over both.
 function isProjectComplete(progress) {
-  if (!progress || Number(progress.total_files) === 0) return false;
+  if (!progress) return false;
+  if (progress.manually_completed_at) return true;
+  if (Number(progress.total_files) === 0) return false;
   const total = Number(progress.total_files);
   if (progress.has_verification) return Number(progress.verified_and_tested) === total;
   return Number(progress.fully_tested) === total;
@@ -355,11 +361,16 @@ function renderProjectBar() {
   const bar = el('project-bar');
   bar.innerHTML = '';
   for (const p of state.projects) {
-    const complete = isProjectComplete(state.projectProgress.get(p.id));
+    const progress = state.projectProgress.get(p.id);
+    const complete = isProjectComplete(progress);
     const chip = document.createElement('button');
     chip.className = 'project-chip' + (p.id === state.activeProjectId ? ' is-active' : '') + (complete ? ' is-complete' : '');
     chip.innerHTML = (complete ? '<span class="chip-check">✓</span> ' : '') + escapeHtml(p.display_name);
-    if (complete) chip.title = 'Complete — every file verified/ingested and tested';
+    if (complete) {
+      chip.title = progress?.manually_completed_at
+        ? `Marked complete manually by ${progress.manually_completed_by || 'someone'} on ${formatDate(progress.manually_completed_at)}`
+        : 'Complete — every file verified/ingested and tested';
+    }
     chip.addEventListener('click', () => selectProject(p.id));
     bar.appendChild(chip);
   }
@@ -383,6 +394,7 @@ async function loadAndRenderProjectFiles(projectId) {
   renderProjectBar();
   if (state.activeProjectId === projectId) {
     el('project-complete-badge').hidden = !isProjectComplete(stats);
+    renderMarkCompleteButton(projectId);
   }
 
   if (stats && Number(stats.total_files) > LARGE_PROJECT_THRESHOLD) {
@@ -429,6 +441,7 @@ async function selectProject(projectId) {
 
   el('project-title').textContent = project.display_name;
   el('project-complete-badge').hidden = !isProjectComplete(state.projectProgress.get(projectId));
+  renderMarkCompleteButton(projectId);
   el('project-meta').textContent =
     `bucket: ${project.gcs_bucket_name || '—'}` +
     `  ·  drive folder: ${project.drive_folder_id || 'not set'}` +
@@ -627,6 +640,49 @@ el('btn-verify').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Verify ingestion';
+  }
+});
+
+function renderMarkCompleteButton(projectId) {
+  const progress = state.projectProgress.get(projectId);
+  const btn = el('btn-mark-complete');
+  if (progress?.manually_completed_at) {
+    btn.textContent = 'Remove manual completion';
+    btn.classList.add('is-marked-complete');
+  } else {
+    btn.textContent = 'Mark project complete';
+    btn.classList.remove('is-marked-complete');
+  }
+}
+
+el('btn-mark-complete').addEventListener('click', async () => {
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  if (!project) return;
+  const progress = state.projectProgress.get(project.id);
+  const currentlyMarked = !!progress?.manually_completed_at;
+
+  if (!currentlyMarked) {
+    const ok = window.confirm(
+      `Mark "${project.display_name}" as fully ingested and tested?\n\nThis overrides the automatic per-file check — use it when you've confirmed the work offline (e.g. outside this app, or for a project too large to browse file-by-file here).`
+    );
+    if (!ok) return;
+  }
+
+  const btn = el('btn-mark-complete');
+  btn.disabled = true;
+  try {
+    await setManualCompletion(project.id, !currentlyMarked, state.session?.user?.email || null);
+    await refreshProjectProgress();
+    renderMarkCompleteButton(project.id);
+    showSyncStatus(
+      currentlyMarked ? 'Manual completion removed.' : 'Marked as fully ingested and tested.',
+      false,
+      true
+    );
+  } catch (err) {
+    showSyncStatus(err.message || 'Could not update completion status.', true);
+  } finally {
+    btn.disabled = false;
   }
 });
 

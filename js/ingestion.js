@@ -263,6 +263,20 @@ export async function loadProgressOverview() {
   return data;
 }
 
+// Manually marks (or unmarks) a project as fully ingested and tested — for
+// work confirmed offline, or projects too large to browse file-by-file in
+// this app. Takes precedence over the derived per-file completion check.
+export async function setManualCompletion(projectId, complete, userEmail) {
+  const { error } = await supabase
+    .from('ingestion_projects')
+    .update({
+      manually_completed_at: complete ? new Date().toISOString() : null,
+      manually_completed_by: complete ? userEmail : null,
+    })
+    .eq('id', projectId);
+  if (error) throw error;
+}
+
 // Same aggregate, scoped to one project — used so huge projects (millions
 // of rows) can show accurate stats without ever loading the full file list
 // into the browser just to count/sum it client-side.
