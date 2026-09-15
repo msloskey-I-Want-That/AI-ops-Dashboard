@@ -263,6 +263,22 @@ input:focus-visible, textarea:focus-visible, button:focus-visible {
   color: #10130a;
   box-shadow: 0 6px 16px -6px rgba(195, 245, 58, 0.45);
 }
+.project-chip.is-complete:not(.is-active) { border-color: rgba(195, 245, 58, 0.45); }
+.chip-check { color: var(--accent-lime); font-weight: 700; }
+.project-chip.is-active .chip-check { color: #10130a; }
+
+.complete-badge {
+  display: inline-block;
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-lime);
+  background: var(--accent-lime-soft);
+  border: 1px solid rgba(195, 245, 58, 0.4);
+  border-radius: 999px;
+  padding: 3px 10px;
+  vertical-align: middle;
+}
 
 /* ---------- Project panel ---------- */
 .project-panel {

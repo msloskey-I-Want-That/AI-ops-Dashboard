@@ -29,6 +29,7 @@ let state = {
   sortColumn: 'file_name',
   sortDirection: 'asc',
   priorSyncAt: null, // this project's last_synced_at as of when it was opened — the baseline for "new since last sync"
+  projectProgress: new Map(), // project_id -> aggregate progress row, used for completion badges
 };
 
 const FILTER_LABELS = {
@@ -317,6 +318,7 @@ async function renderOverview() {
 
 async function refreshProjects() {
   state.projects = await loadProjects();
+  await refreshProjectProgress();
   renderProjectBar();
   if (!state.activeProjectId && state.projects.length > 0) {
     selectProject(state.projects[0].id);
@@ -326,13 +328,38 @@ async function refreshProjects() {
   }
 }
 
+async function refreshProjectProgress() {
+  try {
+    const rows = await loadProgressOverview();
+    state.projectProgress = new Map(rows.map((r) => [r.project_id, r]));
+  } catch {
+    // non-fatal — completion badges just won't show if this fails
+  }
+  renderProjectBar();
+  if (state.activeProjectId) {
+    el('project-complete-badge').hidden = !isProjectComplete(state.projectProgress.get(state.activeProjectId));
+  }
+}
+
+// A project is "complete" once every tracked file has cleared its
+// strongest available confirmation signal: verified + tested where a case
+// database is connected, or ingested + tested (self-reported) otherwise.
+function isProjectComplete(progress) {
+  if (!progress || Number(progress.total_files) === 0) return false;
+  const total = Number(progress.total_files);
+  if (progress.has_verification) return Number(progress.verified_and_tested) === total;
+  return Number(progress.fully_tested) === total;
+}
+
 function renderProjectBar() {
   const bar = el('project-bar');
   bar.innerHTML = '';
   for (const p of state.projects) {
+    const complete = isProjectComplete(state.projectProgress.get(p.id));
     const chip = document.createElement('button');
-    chip.className = 'project-chip' + (p.id === state.activeProjectId ? ' is-active' : '');
-    chip.innerHTML = `${escapeHtml(p.display_name)}`;
+    chip.className = 'project-chip' + (p.id === state.activeProjectId ? ' is-active' : '') + (complete ? ' is-complete' : '');
+    chip.innerHTML = (complete ? '<span class="chip-check">✓</span> ' : '') + escapeHtml(p.display_name);
+    if (complete) chip.title = 'Complete — every file verified/ingested and tested';
     chip.addEventListener('click', () => selectProject(p.id));
     bar.appendChild(chip);
   }
@@ -349,8 +376,13 @@ async function loadAndRenderProjectFiles(projectId) {
   let stats = null;
   try {
     stats = await loadSingleProjectStats(projectId);
+    if (stats) state.projectProgress.set(projectId, stats);
   } catch {
     // fall through — if the stats query fails, just try the normal path
+  }
+  renderProjectBar();
+  if (state.activeProjectId === projectId) {
+    el('project-complete-badge').hidden = !isProjectComplete(stats);
   }
 
   if (stats && Number(stats.total_files) > LARGE_PROJECT_THRESHOLD) {
@@ -396,6 +428,7 @@ async function selectProject(projectId) {
   el('sync-status').hidden = true;
 
   el('project-title').textContent = project.display_name;
+  el('project-complete-badge').hidden = !isProjectComplete(state.projectProgress.get(projectId));
   el('project-meta').textContent =
     `bucket: ${project.gcs_bucket_name || '—'}` +
     `  ·  drive folder: ${project.drive_folder_id || 'not set'}` +
@@ -1028,6 +1061,7 @@ async function bulkApply(stage) {
     state.files = state.files.map((f) => byId.get(f.id) || f);
     state.selectedFileIds = new Set();
     renderFileTable();
+    refreshProjectProgress();
     showSyncStatus(`Marked ${ids.length} file(s) as ${stage}.`, false, true);
   } catch (err) {
     showSyncStatus(err.message || `Could not mark files as ${stage}.`, true);
@@ -1073,6 +1107,7 @@ async function toggleStatus(file, stage, on) {
     const idx = state.files.findIndex((f) => f.id === file.id);
     if (idx !== -1) state.files[idx] = updated;
     renderFileTable();
+    refreshProjectProgress();
   } catch (err) {
     showSyncStatus(err.message || 'Could not update status.', true);
   }
