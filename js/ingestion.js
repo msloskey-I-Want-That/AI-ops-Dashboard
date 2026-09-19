@@ -281,8 +281,9 @@ export async function setManualCompletion(projectId, complete, userEmail) {
 // of rows) can show accurate stats without ever loading the full file list
 // into the browser just to count/sum it client-side.
 export async function loadSingleProjectStats(projectId) {
-  const all = await loadProgressOverview();
-  return all.find((r) => r.project_id === projectId) || null;
+  const { data, error } = await supabase.rpc('get_single_project_progress', { p_project_id: projectId });
+  if (error) throw error;
+  return data?.[0] || null;
 }
 
 // Verifies ingestion against the project's own external case database

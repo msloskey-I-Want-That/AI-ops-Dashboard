@@ -319,7 +319,6 @@ async function renderOverview() {
 
 async function refreshProjects() {
   state.projects = await loadProjects();
-  await refreshProjectProgress();
   renderProjectBar();
   if (!state.activeProjectId && state.projects.length > 0) {
     selectProject(state.projects[0].id);
@@ -327,6 +326,11 @@ async function refreshProjects() {
     el('project-panel').hidden = true;
     el('no-project-state').hidden = false;
   }
+  // Completion badges depend on a cross-project aggregate that can take a
+  // few seconds once any one project reaches hundreds of thousands of rows
+  // (MJN-scale). Let it load in the background rather than blocking the
+  // whole app on it — chips and the selected project are already usable.
+  refreshProjectProgress();
 }
 
 async function refreshProjectProgress() {
@@ -340,6 +344,24 @@ async function refreshProjectProgress() {
   if (state.activeProjectId) {
     el('project-complete-badge').hidden = !isProjectComplete(state.projectProgress.get(state.activeProjectId));
     renderMarkCompleteButton(state.activeProjectId);
+  }
+}
+
+// Cheaper alternative for actions that only change one project's numbers
+// (a single toggle, a bulk mark within one project, a manual completion
+// flip) — avoids re-scanning every other project's files, which matters a
+// lot once any one project gets into the hundreds of thousands of rows.
+async function refreshSingleProjectProgress(projectId) {
+  try {
+    const stats = await loadSingleProjectStats(projectId);
+    if (stats) state.projectProgress.set(projectId, stats);
+  } catch {
+    // non-fatal — completion badges just won't show if this fails
+  }
+  renderProjectBar();
+  if (state.activeProjectId === projectId) {
+    el('project-complete-badge').hidden = !isProjectComplete(state.projectProgress.get(projectId));
+    renderMarkCompleteButton(projectId);
   }
 }
 
@@ -672,7 +694,7 @@ el('btn-mark-complete').addEventListener('click', async () => {
   btn.disabled = true;
   try {
     await setManualCompletion(project.id, !currentlyMarked, state.session?.user?.email || null);
-    await refreshProjectProgress();
+    await refreshSingleProjectProgress(project.id);
     renderMarkCompleteButton(project.id);
     showSyncStatus(
       currentlyMarked ? 'Manual completion removed.' : 'Marked as fully ingested and tested.',
@@ -1117,7 +1139,7 @@ async function bulkApply(stage) {
     state.files = state.files.map((f) => byId.get(f.id) || f);
     state.selectedFileIds = new Set();
     renderFileTable();
-    refreshProjectProgress();
+    refreshSingleProjectProgress(state.activeProjectId);
     showSyncStatus(`Marked ${ids.length} file(s) as ${stage}.`, false, true);
   } catch (err) {
     showSyncStatus(err.message || `Could not mark files as ${stage}.`, true);
@@ -1163,7 +1185,7 @@ async function toggleStatus(file, stage, on) {
     const idx = state.files.findIndex((f) => f.id === file.id);
     if (idx !== -1) state.files[idx] = updated;
     renderFileTable();
-    refreshProjectProgress();
+    refreshSingleProjectProgress(state.activeProjectId);
   } catch (err) {
     showSyncStatus(err.message || 'Could not update status.', true);
   }
