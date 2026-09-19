@@ -64,6 +64,9 @@
           <button class="nav-item" data-view="filetypes">
             <span class="nav-dot"></span> File Types
           </button>
+          <button class="nav-item" data-view="config">
+            <span class="nav-dot"></span> Project Config
+          </button>
           <button class="nav-item" data-view="accounts" disabled>
             <span class="nav-dot nav-dot-muted"></span> Accounts &amp; Budget
             <span class="nav-badge">soon</span>
@@ -239,6 +242,32 @@
         </div>
       </section>
 
+      <!-- Project Config view -->
+      <section id="view-config" class="view" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Project Config</h1>
+            <p class="view-sub">Every project's Drive/GCS/verification setup, at a glance. No secrets stored here — only publishable keys and connection details, safe by design.</p>
+          </div>
+          <button id="btn-add-project-config" class="btn btn-secondary">+ Add project</button>
+        </header>
+        <div class="table-wrap">
+          <table class="file-table" id="config-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Bucket</th>
+                <th>Drive folder</th>
+                <th>Verification</th>
+                <th>Match mode</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="config-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- placeholder views for future modules -->
       <section id="view-accounts" class="view" hidden>
         <header class="view-header"><div><h1>Accounts &amp; Budget</h1><p class="view-sub">Coming soon.</p></div></header>
@@ -251,7 +280,7 @@
 
   <!-- Add / edit project dialog -->
   <dialog id="project-dialog" class="dialog">
-    <form id="project-form" class="dialog-form">
+    <form id="project-form" class="dialog-form dialog-form-scroll">
       <h2 id="dialog-title">Add project</h2>
       <label>Display name
         <input type="text" id="f-display-name" required placeholder="e.g. Gary Fields" />
@@ -271,6 +300,45 @@
       <label>Notes <span class="hint">(optional)</span>
         <textarea id="f-notes" rows="2"></textarea>
       </label>
+
+      <div class="dialog-section">
+        <h3>Verification database <span class="hint">(optional — cross-checks ingestion against this case's own pipeline)</span></h3>
+      </div>
+      <label>Supabase project URL
+        <input type="text" id="f-verify-url" placeholder="https://xxxx.supabase.co" class="mono" />
+      </label>
+      <label>Publishable / anon key <span class="hint">(never the secret key — see note below)</span>
+        <input type="text" id="f-verify-key" placeholder="sb_publishable_..." class="mono" />
+      </label>
+      <label>Table name
+        <input type="text" id="f-verify-table" placeholder="documents" class="mono" />
+      </label>
+      <label>Path column <span class="hint">(holds the GCS path/URI per row)</span>
+        <input type="text" id="f-verify-path-col" placeholder="gcs_archive_path" class="mono" />
+      </label>
+      <label>Status column
+        <input type="text" id="f-verify-status-col" placeholder="ingestion_status" class="mono" />
+      </label>
+      <label>Success value <span class="hint">(the status meaning "done" — e.g. indexed)</span>
+        <input type="text" id="f-verify-success" placeholder="indexed" class="mono" />
+      </label>
+      <label>Path prefix to strip <span class="hint">(optional — e.g. bucket_name/ or gs://bucket/)</span>
+        <input type="text" id="f-verify-prefix" placeholder="leave blank to use bucket_name/" class="mono" />
+      </label>
+      <label>Match mode
+        <select id="f-verify-match-mode">
+          <option value="path">Full path (default)</option>
+          <option value="filename">Filename only (use when paths are reorganized/renamed)</option>
+        </select>
+      </label>
+      <label>Filter column <span class="hint">(optional — for shared/multi-case tables)</span>
+        <input type="text" id="f-verify-filter-col" placeholder="e.g. investigation_id" class="mono" />
+      </label>
+      <label>Filter value <span class="hint">(the ID/value matching just this case)</span>
+        <input type="text" id="f-verify-filter-val" placeholder="matching UUID or value" class="mono" />
+      </label>
+      <p class="dialog-note">Only publishable/anon keys belong here — they're safe because Row Level Security decides what they can access. Never enter a database password or secret key in this app.</p>
+
       <div class="dialog-actions">
         <button type="button" id="btn-cancel-dialog" class="btn btn-ghost">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>

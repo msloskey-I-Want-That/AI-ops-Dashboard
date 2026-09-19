@@ -466,9 +466,23 @@ input[type="checkbox"].row-check, #check-all {
 }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); }
 .dialog-form { padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+.dialog-form-scroll { max-height: 80vh; overflow-y: auto; }
 .dialog-form h2 { margin: 0 0 4px; font-size: 17px; font-weight: 620; }
 .dialog-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 .dialog-form .hint { color: var(--text-muted); font-weight: 400; }
+.dialog-form select {
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 10px 13px;
+  font-size: 14px;
+}
+.dialog-section { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--glass-border); }
+.dialog-section h3 { margin: 0; font-size: 13px; font-weight: 620; color: var(--text-primary); }
+.dialog-section .hint { font-weight: 400; color: var(--text-muted); font-size: 12px; }
+.dialog-note { font-size: 11.5px; color: var(--text-muted); margin: 0; line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 
 /* ---------- Sync progress dialog ---------- */

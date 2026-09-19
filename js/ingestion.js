@@ -35,10 +35,10 @@ export async function loadFiles(projectId) {
   return allRows;
 }
 
-export async function addProject({ slug, display_name, drive_folder_id, gcs_bucket_name, gcp_project_id, notes }) {
+export async function addProject(fields) {
   const { data, error } = await supabase
     .from('ingestion_projects')
-    .insert({ slug, display_name, drive_folder_id, gcs_bucket_name, gcp_project_id, notes })
+    .insert(fields)
     .select()
     .single();
   if (error) throw error;

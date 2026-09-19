@@ -157,6 +157,7 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
     el(`view-${view}`).hidden = false;
     if (view === 'overview') renderOverview();
     if (view === 'filetypes') initFiletypesView();
+    if (view === 'config') renderConfigTable();
   });
 });
 
@@ -320,6 +321,7 @@ async function renderOverview() {
 async function refreshProjects() {
   state.projects = await loadProjects();
   renderProjectBar();
+  renderConfigTable();
   if (!state.activeProjectId && state.projects.length > 0) {
     selectProject(state.projects[0].id);
   } else if (state.projects.length === 0) {
@@ -664,6 +666,33 @@ el('btn-verify').addEventListener('click', async () => {
     btn.textContent = 'Verify ingestion';
   }
 });
+
+function renderConfigTable() {
+  const tbody = el('config-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  for (const p of state.projects) {
+    const hasVerify = !!p.verify_supabase_url;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="file-name">${escapeHtml(p.display_name)}</td>
+      <td class="mono">${escapeHtml(p.gcs_bucket_name || '—')}</td>
+      <td class="mono">${escapeHtml(p.drive_folder_id || 'not set')}</td>
+      <td>${pillHtml(hasVerify, hasVerify ? escapeHtml(p.verify_table || 'configured') : 'not configured')}</td>
+      <td class="mono">${hasVerify ? escapeHtml(p.verify_match_mode || 'path') : '—'}</td>
+      <td></td>
+    `;
+    const editCell = tr.children[5];
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn btn-ghost btn-sm';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => openProjectDialog(p));
+    editCell.appendChild(editBtn);
+    tbody.appendChild(tr);
+  }
+}
+
+el('btn-add-project-config').addEventListener('click', () => openProjectDialog(null));
 
 function renderMarkCompleteButton(projectId) {
   const progress = state.projectProgress.get(projectId);
@@ -1331,6 +1360,16 @@ function openProjectDialog(project) {
   el('f-gcs-bucket').value = project?.gcs_bucket_name || '';
   el('f-gcp-project').value = project?.gcp_project_id || '';
   el('f-notes').value = project?.notes || '';
+  el('f-verify-url').value = project?.verify_supabase_url || '';
+  el('f-verify-key').value = project?.verify_supabase_anon_key || '';
+  el('f-verify-table').value = project?.verify_table || '';
+  el('f-verify-path-col').value = project?.verify_path_column || '';
+  el('f-verify-status-col').value = project?.verify_status_column || '';
+  el('f-verify-success').value = project?.verify_success_value || '';
+  el('f-verify-prefix').value = project?.verify_path_prefix || '';
+  el('f-verify-match-mode').value = project?.verify_match_mode || 'path';
+  el('f-verify-filter-col').value = project?.verify_filter_column || '';
+  el('f-verify-filter-val').value = project?.verify_filter_value || '';
   el('project-dialog').showModal();
 }
 
@@ -1343,6 +1382,16 @@ el('project-form').addEventListener('submit', async (e) => {
     gcs_bucket_name: el('f-gcs-bucket').value.trim(),
     gcp_project_id: el('f-gcp-project').value.trim() || null,
     notes: el('f-notes').value.trim() || null,
+    verify_supabase_url: el('f-verify-url').value.trim() || null,
+    verify_supabase_anon_key: el('f-verify-key').value.trim() || null,
+    verify_table: el('f-verify-table').value.trim() || null,
+    verify_path_column: el('f-verify-path-col').value.trim() || null,
+    verify_status_column: el('f-verify-status-col').value.trim() || null,
+    verify_success_value: el('f-verify-success').value.trim() || null,
+    verify_path_prefix: el('f-verify-prefix').value.trim() || null,
+    verify_match_mode: el('f-verify-match-mode').value || 'path',
+    verify_filter_column: el('f-verify-filter-col').value.trim() || null,
+    verify_filter_value: el('f-verify-filter-val').value.trim() || null,
   };
 
   try {
