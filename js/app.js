@@ -15,6 +15,7 @@ import {
   downloadProjectAsZip,
   DOWNLOAD_ZIP_MAX_BYTES,
   setManualCompletion,
+  deleteProject,
 } from './ingestion.js';
 
 const el = (id) => document.getElementById(id);
@@ -681,6 +682,7 @@ function renderConfigTable() {
       <td>${pillHtml(hasVerify, hasVerify ? escapeHtml(p.verify_table || 'configured') : 'not configured')}</td>
       <td class="mono">${hasVerify ? escapeHtml(p.verify_match_mode || 'path') : '—'}</td>
       <td></td>
+      <td></td>
     `;
     const editCell = tr.children[5];
     const editBtn = document.createElement('button');
@@ -688,7 +690,45 @@ function renderConfigTable() {
     editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', () => openProjectDialog(p));
     editCell.appendChild(editBtn);
+
+    const deleteCell = tr.children[6];
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn btn-ghost btn-sm btn-delete';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => handleDeleteProject(p));
+    deleteCell.appendChild(deleteBtn);
+
     tbody.appendChild(tr);
+  }
+}
+
+async function handleDeleteProject(project) {
+  let fileCountNote = '';
+  try {
+    const stats = await loadSingleProjectStats(project.id);
+    if (stats && Number(stats.total_files) > 0) {
+      fileCountNote = ` and all ${Number(stats.total_files).toLocaleString()} of its tracked file records`;
+    }
+  } catch {
+    // if the count check fails, still allow deleting — just without the specific number
+  }
+
+  const ok = window.confirm(
+    `Permanently delete "${project.display_name}"${fileCountNote}?\n\nThis only removes this app's tracking data — it does NOT delete anything from Google Drive or Cloud Storage. This cannot be undone.`
+  );
+  if (!ok) return;
+
+  try {
+    await deleteProject(project.id);
+    if (state.activeProjectId === project.id) {
+      state.activeProjectId = null;
+      state.files = [];
+    }
+    state.projectProgress.delete(project.id);
+    await refreshProjects();
+    showSyncStatus(`Deleted "${project.display_name}".`, false, true);
+  } catch (err) {
+    showSyncStatus(err.message || 'Could not delete project.', true);
   }
 }
 

@@ -56,6 +56,14 @@ export async function updateProject(id, fields) {
   return data;
 }
 
+// Deletes a project and, via the ingestion_files.project_id foreign key's
+// ON DELETE CASCADE, every file record tracked under it. Does not touch
+// the actual files in Drive or GCS — only this app's tracking data.
+export async function deleteProject(id) {
+  const { error } = await supabase.from('ingestion_projects').delete().eq('id', id);
+  if (error) throw error;
+}
+
 export async function setFileStatus(fileId, stage, on, userEmail) {
   // stage is 'ingested' or 'tested'
   const fields =
