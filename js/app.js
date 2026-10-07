@@ -32,6 +32,7 @@ let state = {
   sortDirection: 'asc',
   priorSyncAt: null, // this project's last_synced_at as of when it was opened — the baseline for "new since last sync"
   projectProgress: new Map(), // project_id -> aggregate progress row, used for completion badges
+  lastSyncReport: null, // most recent Sync all report (also persisted to localStorage)
 };
 
 const FILTER_LABELS = {
@@ -1290,6 +1291,240 @@ function renderStats(total, missingFromGcs, notIngested, notTested, totalBytes, 
 
 // ---------------- Add / edit project dialog ----------------
 
+// ---------------- Sync report ----------------
+// After Sync all, shows exactly what was copied from Drive into each
+// project's GCS bucket — the list to work from when re-running ingestion.
+
+const REPORT_STORAGE_KEY = 'ai-ops:lastSyncReport';
+const REPORT_FILE_DISPLAY_CAP = 500; // the CSV always has everything
+
+function saveSyncReport(report) {
+  state.lastSyncReport = report;
+  try {
+    localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(report));
+  } catch {
+    // Too large or storage unavailable. Remove any older saved report so a
+    // reload doesn't resurface a stale one; the in-memory copy still works.
+    try { localStorage.removeItem(REPORT_STORAGE_KEY); } catch { /* ignore */ }
+  }
+  el('btn-sync-report').hidden = false;
+}
+
+function loadSavedSyncReport() {
+  try {
+    const raw = localStorage.getItem(REPORT_STORAGE_KEY);
+    if (!raw) return;
+    state.lastSyncReport = JSON.parse(raw);
+    el('btn-sync-report').hidden = false;
+  } catch {
+    // corrupt or unavailable — just start without one
+  }
+}
+
+// Builds a per-project collector fed by syncProject's progress events. Using
+// the events (rather than the function's return value) means files copied
+// before a mid-sync failure still make it into the report.
+function makeReportCollector(project) {
+  return {
+    name: project.display_name,
+    bucket: project.gcs_bucket_name,
+    status: 'ok',
+    error: null,
+    copiedFiles: [],
+    failedFiles: [],
+    nativeSkipped: [],
+    alreadyThereCount: 0,
+    record(event) {
+      if (event.phase !== 'copy') return;
+      if (event.outcome === 'copied') this.copiedFiles.push({ name: event.name, bytes: event.bytes ?? null });
+      else if (event.outcome === 'failed') this.failedFiles.push({ name: event.name, message: event.message || '' });
+      else if (event.outcome === 'skipped-native') this.nativeSkipped.push({ name: event.name, mimeType: event.mimeType || '' });
+      else if (event.outcome === 'skipped-exists') this.alreadyThereCount++;
+    },
+  };
+}
+
+function reportCopiedBytes(entry) {
+  return entry.copiedFiles.reduce((sum, f) => sum + (Number(f.bytes) || 0), 0);
+}
+
+function reportEntryHasProblems(entry) {
+  return entry.status === 'error' || entry.failedFiles.length > 0;
+}
+
+function renderSyncReport(report) {
+  const when = new Date(report.generatedAt).toLocaleString();
+  el('report-meta').textContent = report.stoppedAt
+    ? `${when} — stopped early at ${report.stoppedAt} (Google session expired). Projects after it were not synced.`
+    : `${when} — ${report.entries.length} project(s) synced.`;
+
+  const needsReingest = report.entries.filter((e) => e.copiedFiles.length > 0);
+  const problems = report.entries.filter(reportEntryHasProblems);
+  const unchanged = report.entries.filter((e) => e.copiedFiles.length === 0 && e.nativeSkipped.length === 0 && !reportEntryHasProblems(e));
+
+  const summary = el('report-summary');
+  summary.innerHTML = '';
+  const addLine = (text, cls) => {
+    const div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = text;
+    summary.appendChild(div);
+  };
+  if (needsReingest.length > 0) {
+    const total = needsReingest.reduce((n, e) => n + e.copiedFiles.length, 0);
+    addLine(`Re-ingest needed for ${needsReingest.length} project(s) — ${total.toLocaleString()} new file(s) copied to GCS:`, 'is-reingest');
+    for (const e of needsReingest) {
+      addLine(`• ${e.name} — ${e.copiedFiles.length.toLocaleString()} file(s), ${formatBytes(reportCopiedBytes(e))} → gs://${e.bucket}`);
+    }
+  } else {
+    addLine('Nothing new was copied — no re-ingest needed from this sync.', 'is-reingest');
+  }
+  for (const e of problems) {
+    const bits = [];
+    if (e.status === 'error') bits.push(`sync failed: ${e.error}`);
+    if (e.failedFiles.length) bits.push(`${e.failedFiles.length} file(s) failed to copy`);
+    addLine(`⚠ ${e.name} — ${bits.join('; ')}`, 'is-problem');
+  }
+  const nativeTotal = report.entries.reduce((n, e) => n + e.nativeSkipped.length, 0);
+  if (nativeTotal > 0) {
+    addLine(`${nativeTotal} native Google Doc/Sheet/Slide file(s) can't be copied directly and are NOT in GCS — export them to a normal file type if they belong in the case.`);
+  }
+  if (unchanged.length > 0) addLine(`No changes: ${unchanged.map((e) => e.name).join(', ')}`);
+  if (report.skippedProjects.length > 0) addLine(`Not synced (no Drive folder or bucket set): ${report.skippedProjects.join(', ')}`);
+
+  const list = el('report-projects');
+  list.innerHTML = '';
+  for (const e of report.entries) {
+    if (e.copiedFiles.length === 0 && !reportEntryHasProblems(e) && e.nativeSkipped.length === 0) continue;
+    const details = document.createElement('details');
+    details.className = 'report-project' + (e.copiedFiles.length ? ' has-copies' : '') + (reportEntryHasProblems(e) ? ' has-problems' : '');
+    const sum = document.createElement('summary');
+    sum.innerHTML = `<span class="rp-name"></span><span class="rp-bucket mono"></span><span class="rp-counts"></span>`;
+    sum.querySelector('.rp-name').textContent = e.name;
+    sum.querySelector('.rp-bucket').textContent = `gs://${e.bucket}`;
+    const counts = [];
+    if (e.copiedFiles.length) counts.push(`${e.copiedFiles.length.toLocaleString()} copied`);
+    if (e.failedFiles.length) counts.push(`${e.failedFiles.length} failed`);
+    if (e.nativeSkipped.length) counts.push(`${e.nativeSkipped.length} not copyable`);
+    if (e.status === 'error') counts.push('sync error');
+    sum.querySelector('.rp-counts').textContent = counts.join(' · ');
+    details.appendChild(sum);
+
+    // File lists can be thousands long — only build them when opened.
+    let built = false;
+    details.addEventListener('toggle', () => {
+      if (!details.open || built) return;
+      built = true;
+      const box = document.createElement('div');
+      box.className = 'report-files mono';
+      const rows = [
+        ...e.copiedFiles.map((f) => ({ cls: '', text: f.name, extra: f.bytes != null ? formatBytes(f.bytes) : '' })),
+        ...e.failedFiles.map((f) => ({ cls: 'is-failed', text: `FAILED: ${f.name}`, extra: f.message })),
+        ...e.nativeSkipped.map((f) => ({ cls: 'is-skipped', text: `NOT COPIED (native Google file): ${f.name}`, extra: '' })),
+      ];
+      for (const r of rows.slice(0, REPORT_FILE_DISPLAY_CAP)) {
+        const row = document.createElement('div');
+        row.className = `report-file ${r.cls}`;
+        row.textContent = r.text;
+        if (r.extra) {
+          const sz = document.createElement('span');
+          sz.className = 'rf-size';
+          sz.textContent = r.extra;
+          row.appendChild(sz);
+        }
+        box.appendChild(row);
+      }
+      if (rows.length > REPORT_FILE_DISPLAY_CAP) {
+        const more = document.createElement('div');
+        more.className = 'report-more';
+        more.textContent = `…and ${(rows.length - REPORT_FILE_DISPLAY_CAP).toLocaleString()} more — download the CSV for the full list.`;
+        box.appendChild(more);
+      }
+      details.appendChild(box);
+    });
+    list.appendChild(details);
+  }
+}
+
+function syncReportToText(report) {
+  const lines = [`Sync report — ${new Date(report.generatedAt).toLocaleString()}`];
+  if (report.stoppedAt) lines.push(`(Stopped early at ${report.stoppedAt} — Google session expired.)`);
+  const needs = report.entries.filter((e) => e.copiedFiles.length > 0);
+  lines.push('');
+  if (needs.length) {
+    lines.push('RE-INGEST NEEDED:');
+    for (const e of needs) lines.push(`  ${e.name} — ${e.copiedFiles.length} file(s), ${formatBytes(reportCopiedBytes(e))} → gs://${e.bucket}`);
+  } else {
+    lines.push('Nothing new copied — no re-ingest needed.');
+  }
+  const problems = report.entries.filter(reportEntryHasProblems);
+  if (problems.length) {
+    lines.push('', 'PROBLEMS:');
+    for (const e of problems) {
+      const bits = [];
+      if (e.status === 'error') bits.push(`sync failed: ${e.error}`);
+      if (e.failedFiles.length) bits.push(`${e.failedFiles.length} file(s) failed to copy`);
+      lines.push(`  ${e.name} — ${bits.join('; ')}`);
+    }
+  }
+  const unchanged = report.entries.filter((e) => e.copiedFiles.length === 0 && e.nativeSkipped.length === 0 && !reportEntryHasProblems(e));
+  if (unchanged.length) lines.push('', `No changes: ${unchanged.map((e) => e.name).join(', ')}`);
+  if (report.skippedProjects.length) lines.push(`Not synced (no Drive folder/bucket): ${report.skippedProjects.join(', ')}`);
+  return lines.join('\n');
+}
+
+function syncReportToCsv(report) {
+  const esc = (v) => {
+    const str = v == null ? '' : String(v);
+    return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+  const rows = [['synced_at', 'project', 'bucket', 'outcome', 'file', 'gcs_path', 'size_bytes', 'message']];
+  for (const e of report.entries) {
+    const base = [report.generatedAt, e.name, e.bucket];
+    const path = (name) => `gs://${e.bucket}/${name}`;
+    for (const f of e.copiedFiles) rows.push([...base, 'copied', f.name, path(f.name), f.bytes ?? '', '']);
+    for (const f of e.failedFiles) rows.push([...base, 'failed', f.name, '', '', f.message]);
+    for (const f of e.nativeSkipped) rows.push([...base, 'not-copied-native-google-file', f.name, '', '', f.mimeType]);
+    if (e.status === 'error') rows.push([...base, 'sync-error', '', '', '', e.error]);
+    if (e.copiedFiles.length === 0 && e.failedFiles.length === 0 && e.nativeSkipped.length === 0 && e.status === 'ok') {
+      rows.push([...base, 'no-changes', '', '', '', '']);
+    }
+  }
+  return '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+
+function openSyncReport(report) {
+  if (!report) return;
+  renderSyncReport(report);
+  el('btn-report-copy').textContent = 'Copy summary';
+  el('sync-report-dialog').showModal();
+}
+
+el('btn-sync-report').addEventListener('click', () => openSyncReport(state.lastSyncReport));
+el('btn-report-close').addEventListener('click', () => el('sync-report-dialog').close());
+el('btn-report-copy').addEventListener('click', async () => {
+  if (!state.lastSyncReport) return;
+  try {
+    await navigator.clipboard.writeText(syncReportToText(state.lastSyncReport));
+    el('btn-report-copy').textContent = 'Copied ✓';
+  } catch {
+    el('btn-report-copy').textContent = 'Copy failed';
+  }
+});
+el('btn-report-csv').addEventListener('click', () => {
+  if (!state.lastSyncReport) return;
+  const blob = new Blob([syncReportToCsv(state.lastSyncReport)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sync-report-${state.lastSyncReport.generatedAt.slice(0, 16).replace(/[:T]/g, '-')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+loadSavedSyncReport();
+
 el('btn-sync-all').addEventListener('click', syncAllProjects);
 
 async function syncAllProjects() {
@@ -1328,12 +1563,19 @@ async function syncAllProjects() {
 
   const failures = [];
   const copyNotes = [];
+  const reportEntries = [];
+  const skippedNames = skipped.map((p) => p.display_name);
   for (let i = 0; i < eligible.length; i++) {
     const project = eligible[i];
     statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name}…`;
     const prefix = `[${i + 1}/${eligible.length}] ${project.display_name}: `;
+    const collector = makeReportCollector(project);
+    reportEntries.push(collector);
     try {
-      const result = await syncProject(project, token, (event) => handleSyncProgressEvent(event, prefix));
+      const result = await syncProject(project, token, (event) => {
+        collector.record(event);
+        handleSyncProgressEvent(event, prefix);
+      });
       if (result.syncedAt) project.last_synced_at = result.syncedAt;
       if (result.copied) copyNotes.push(`${project.display_name}: ${result.copied} copied to GCS`);
       if (result.failed && result.failed.length) {
@@ -1360,9 +1602,14 @@ async function syncAllProjects() {
         btn.disabled = false;
         setProgressPhase(`Stopped — Google session expired at ${project.display_name}.`);
         appendProgressLog(err.message || 'Google session expired.', 'failed');
+        collector.status = 'error';
+        collector.error = 'Google session expired partway through';
+        finishSyncReport(reportEntries, skippedNames, project.display_name);
         return;
       }
       appendProgressLog(`${prefix}${err.message || String(err)}`, 'failed');
+      collector.status = 'error';
+      collector.error = err.message || String(err);
       failures.push({ name: project.display_name, message: err.message || String(err) });
     }
   }
@@ -1383,7 +1630,22 @@ async function syncAllProjects() {
     statusBox.textContent = `Synced ${eligible.length - failures.length}/${eligible.length} project(s). Failed: ${failures.map((f) => `${f.name} (${f.message})`).join('; ')}${copyNote}${skippedNote}`;
     appendProgressLog(`Finished with ${failures.length} failure(s).`, 'failed');
   }
+  finishSyncReport(reportEntries, skippedNames, null);
 }
+
+// Saves the report and opens it in place of the progress window.
+function finishSyncReport(entries, skippedProjects, stoppedAt) {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    stoppedAt,
+    skippedProjects,
+    entries: entries.map(({ record, ...data }) => data), // drop the collector's method before saving
+  };
+  saveSyncReport(report);
+  el('sync-progress-dialog').close();
+  openSyncReport(report);
+}
+
 el('btn-add-project').addEventListener('click', () => openProjectDialog(null));
 el('btn-edit-project').addEventListener('click', () => {
   const project = state.projects.find((p) => p.id === state.activeProjectId);

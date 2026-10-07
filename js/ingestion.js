@@ -161,7 +161,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
         if (!meta) continue;
         if (isGoogleNativeFile(meta.mimeType)) {
           copyResult.skippedNative++;
-          emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'skipped-native' });
+          emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'skipped-native', mimeType: meta.mimeType });
           continue;
         }
         try {
@@ -170,7 +170,7 @@ export async function syncProject(project, googleAccessToken, onProgress) {
           if (outcome === 'uploaded') {
             copyResult.copied++;
             byName.set(name, { ...row, gcs_object_name: name, gcs_size_bytes: blob.size, gcs_last_seen_at: now });
-            emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'copied' });
+            emit({ phase: 'copy', index: idx + 1, total: toCopy.length, name, outcome: 'copied', bytes: blob.size });
           } else {
             copyResult.skippedExists++;
             byName.set(name, { ...row, gcs_object_name: name, gcs_last_seen_at: now });

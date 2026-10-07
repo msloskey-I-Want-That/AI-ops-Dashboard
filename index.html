@@ -130,6 +130,7 @@
             <p class="view-sub">Drive → Cloud Storage → Supabase, reconciled in one place.</p>
           </div>
           <div class="header-actions">
+            <button id="btn-sync-report" class="btn btn-ghost" hidden>Last sync report</button>
             <button id="btn-sync-all" class="btn btn-secondary">Sync all</button>
             <button id="btn-add-project" class="btn btn-secondary">+ Add project</button>
           </div>
@@ -356,6 +357,21 @@
       <div id="sync-progress-log" class="progress-log"></div>
       <div class="dialog-actions">
         <button type="button" id="btn-close-sync-progress" class="btn btn-ghost">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Sync report dialog -->
+  <dialog id="sync-report-dialog" class="dialog report-dialog">
+    <div class="dialog-form dialog-form-scroll">
+      <h2>Sync report</h2>
+      <p id="report-meta" class="report-meta"></p>
+      <div id="report-summary" class="report-summary"></div>
+      <div id="report-projects" class="report-projects"></div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-report-copy" class="btn btn-ghost">Copy summary</button>
+        <button type="button" id="btn-report-csv" class="btn btn-secondary">Download CSV</button>
+        <button type="button" id="btn-report-close" class="btn btn-primary">Close</button>
       </div>
     </div>
   </dialog>
