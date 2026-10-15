@@ -471,7 +471,8 @@ async function selectProject(projectId) {
   el('project-meta').textContent =
     `bucket: ${project.gcs_bucket_name || '—'}` +
     `  ·  drive folder: ${project.drive_folder_id || 'not set'}` +
-    (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '');
+    (project.gcp_project_id ? `  ·  gcp: ${project.gcp_project_id}` : '') +
+    (project.exclude_from_sync_all ? '  ·  excluded from Sync all' : '');
 
   // Captured now, before any sync in this viewing session can move it —
   // this is the baseline "new since last sync" compares against, so it
@@ -1391,6 +1392,7 @@ function renderSyncReport(report) {
   }
   if (unchanged.length > 0) addLine(`No changes: ${unchanged.map((e) => e.name).join(', ')}`);
   if (report.skippedProjects.length > 0) addLine(`Not synced (no Drive folder or bucket set): ${report.skippedProjects.join(', ')}`);
+  if ((report.excludedProjects || []).length > 0) addLine(`Excluded from Sync all (monitor only): ${report.excludedProjects.join(', ')}`);
 
   const list = el('report-projects');
   list.innerHTML = '';
@@ -1470,6 +1472,7 @@ function syncReportToText(report) {
   const unchanged = report.entries.filter((e) => e.copiedFiles.length === 0 && e.nativeSkipped.length === 0 && !reportEntryHasProblems(e));
   if (unchanged.length) lines.push('', `No changes: ${unchanged.map((e) => e.name).join(', ')}`);
   if (report.skippedProjects.length) lines.push(`Not synced (no Drive folder/bucket): ${report.skippedProjects.join(', ')}`);
+  if ((report.excludedProjects || []).length) lines.push(`Excluded from Sync all (monitor only): ${report.excludedProjects.join(', ')}`);
   return lines.join('\n');
 }
 
@@ -1528,7 +1531,9 @@ loadSavedSyncReport();
 el('btn-sync-all').addEventListener('click', syncAllProjects);
 
 async function syncAllProjects() {
-  const eligible = state.projects.filter((p) => p.drive_folder_id && p.gcs_bucket_name);
+  const syncable = state.projects.filter((p) => p.drive_folder_id && p.gcs_bucket_name);
+  const excluded = syncable.filter((p) => p.exclude_from_sync_all); // monitor-only
+  const eligible = syncable.filter((p) => !p.exclude_from_sync_all);
   const skipped = state.projects.filter((p) => !p.drive_folder_id || !p.gcs_bucket_name);
   const statusBox = el('sync-all-status');
   const btn = el('btn-sync-all');
@@ -1536,7 +1541,7 @@ async function syncAllProjects() {
   if (eligible.length === 0) {
     statusBox.hidden = false;
     statusBox.classList.add('is-error');
-    statusBox.textContent = 'No projects have both a Drive folder and GCS bucket set yet — nothing to sync.';
+    statusBox.textContent = 'No projects are set up for Sync all (each needs a Drive folder and GCS bucket, and not be excluded) — nothing to sync.';
     return;
   }
 
@@ -1565,6 +1570,7 @@ async function syncAllProjects() {
   const copyNotes = [];
   const reportEntries = [];
   const skippedNames = skipped.map((p) => p.display_name);
+  const excludedNames = excluded.map((p) => p.display_name);
   for (let i = 0; i < eligible.length; i++) {
     const project = eligible[i];
     statusBox.textContent = `Syncing ${i + 1}/${eligible.length}: ${project.display_name}…`;
@@ -1604,7 +1610,7 @@ async function syncAllProjects() {
         appendProgressLog(err.message || 'Google session expired.', 'failed');
         collector.status = 'error';
         collector.error = 'Google session expired partway through';
-        finishSyncReport(reportEntries, skippedNames, project.display_name);
+        finishSyncReport(reportEntries, skippedNames, project.display_name, excludedNames);
         return;
       }
       appendProgressLog(`${prefix}${err.message || String(err)}`, 'failed');
@@ -1615,7 +1621,8 @@ async function syncAllProjects() {
   }
 
   btn.disabled = false;
-  const skippedNote = skipped.length ? ` (${skipped.length} skipped — no Drive folder/bucket set: ${skipped.map((p) => p.display_name).join(', ')})` : '';
+  const skippedNote = (skipped.length ? ` (${skipped.length} skipped — no Drive folder/bucket set: ${skipped.map((p) => p.display_name).join(', ')})` : '')
+    + (excluded.length ? ` Excluded from Sync all: ${excluded.map((p) => p.display_name).join(', ')}.` : '');
   const copyNote = copyNotes.length ? ` ${copyNotes.join('; ')}.` : '';
   setProgressPhase('Done.');
   setProgressBar(100);
@@ -1630,15 +1637,16 @@ async function syncAllProjects() {
     statusBox.textContent = `Synced ${eligible.length - failures.length}/${eligible.length} project(s). Failed: ${failures.map((f) => `${f.name} (${f.message})`).join('; ')}${copyNote}${skippedNote}`;
     appendProgressLog(`Finished with ${failures.length} failure(s).`, 'failed');
   }
-  finishSyncReport(reportEntries, skippedNames, null);
+  finishSyncReport(reportEntries, skippedNames, null, excludedNames);
 }
 
 // Saves the report and opens it in place of the progress window.
-function finishSyncReport(entries, skippedProjects, stoppedAt) {
+function finishSyncReport(entries, skippedProjects, stoppedAt, excludedProjects = []) {
   const report = {
     generatedAt: new Date().toISOString(),
     stoppedAt,
     skippedProjects,
+    excludedProjects,
     entries: entries.map(({ record, ...data }) => data), // drop the collector's method before saving
   };
   saveSyncReport(report);
@@ -1662,6 +1670,7 @@ function openProjectDialog(project) {
   el('f-gcs-bucket').value = project?.gcs_bucket_name || '';
   el('f-gcp-project').value = project?.gcp_project_id || '';
   el('f-notes').value = project?.notes || '';
+  el('f-exclude-sync-all').checked = !!project?.exclude_from_sync_all;
   el('f-verify-url').value = project?.verify_supabase_url || '';
   el('f-verify-key').value = project?.verify_supabase_anon_key || '';
   el('f-verify-table').value = project?.verify_table || '';
@@ -1684,6 +1693,7 @@ el('project-form').addEventListener('submit', async (e) => {
     gcs_bucket_name: el('f-gcs-bucket').value.trim(),
     gcp_project_id: el('f-gcp-project').value.trim() || null,
     notes: el('f-notes').value.trim() || null,
+    exclude_from_sync_all: el('f-exclude-sync-all').checked,
     verify_supabase_url: el('f-verify-url').value.trim() || null,
     verify_supabase_anon_key: el('f-verify-key').value.trim() || null,
     verify_table: el('f-verify-table').value.trim() || null,

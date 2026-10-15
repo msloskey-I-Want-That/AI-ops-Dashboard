@@ -622,3 +622,6 @@ input[type="checkbox"].row-check, #check-all {
 .report-file.is-failed { color: var(--danger); }
 .report-file.is-skipped { color: var(--text-muted); }
 .report-more { font-size: 12px; color: var(--text-muted); padding-top: 6px; }
+
+.dialog-form label.checkbox-row { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
+.dialog-form label.checkbox-row input { margin-top: 3px; accent-color: var(--accent-lime); }
