@@ -75,9 +75,7 @@ export async function setBatchStatus(batchId, status, userEmail) {
   const { data, error } = await supabase
     .from('ingest_batches')
     .update(payload)
-    .eq('id', batchId)
-    .select()
-    .single();
+    .eq('id', batchId);
 
   if (error) throw error;
   return data;
@@ -108,8 +106,7 @@ export async function loadHeldItems() {
 }
 
 export async function mapUnprovisionedFolder(folderId, projectId, userEmail) {
-  // 1. Update disposition
-  const { error: dispErr } = await supabase
+  const { error } = await supabase
     .from('ingest_folder_dispositions')
     .update({
       disposition: 'mapped',
@@ -118,33 +115,20 @@ export async function mapUnprovisionedFolder(folderId, projectId, userEmail) {
       decided_at: new Date().toISOString(),
     })
     .eq('drive_folder_id', folderId);
-  if (dispErr) throw dispErr;
-
-  // 2. Update ingestion_projects row with Drive folder ID
-  const { error: projErr } = await supabase
-    .from('ingestion_projects')
-    .update({ drive_folder_id: folderId })
-    .eq('id', projectId);
-  if (projErr) throw projErr;
+  if (error) throw error;
 }
 
 export async function ignoreUnprovisionedFolder(folderId, userEmail) {
-  const { error: dispErr } = await supabase
+  const { error } = await supabase
     .from('ingest_folder_dispositions')
     .update({
       disposition: 'ignored',
+      mapped_project_id: null,
       decided_by: userEmail,
       decided_at: new Date().toISOString(),
     })
     .eq('drive_folder_id', folderId);
-  if (dispErr) throw dispErr;
-
-  // Update any pending ledger rows for this folder
-  await supabase
-    .from('drive_ingest_ledger')
-    .update({ status: 'ignored' })
-    .eq('top_folder_id', folderId)
-    .in('status', ['held_unprovisioned', 'pending_approval']);
+  if (error) throw error;
 }
 
 export async function loadRecentExecutions() {
