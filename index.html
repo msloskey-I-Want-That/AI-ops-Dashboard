@@ -67,6 +67,9 @@
           <button class="nav-item" data-view="config">
             <span class="nav-dot"></span> Project Config
           </button>
+          <button class="nav-item" data-view="approvals">
+            <span class="nav-dot"></span> Approvals
+          </button>
           <button class="nav-item" data-view="accounts" disabled>
             <span class="nav-dot nav-dot-muted"></span> Accounts &amp; Budget
             <span class="nav-badge">soon</span>
@@ -267,6 +270,45 @@
             </thead>
             <tbody id="config-table-body"></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- Approvals view -->
+      <section id="view-approvals" class="view" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Ingestion Approvals</h1>
+            <p class="view-sub">Approval gate for incoming Drive files before copying to GCS and matter ingestion.</p>
+          </div>
+          <button id="btn-refresh-approvals" class="btn btn-secondary">Refresh</button>
+        </header>
+
+        <div class="approvals-section">
+          <h2>Pending Approval</h2>
+          <div id="approvals-pending-list"></div>
+        </div>
+
+        <div class="approvals-section">
+          <h2>Held Items</h2>
+          <div class="held-grid">
+            <div class="glass-panel">
+              <h3>Unprovisioned Folders</h3>
+              <p class="empty-state-sub">Drive folders detected in repository that are not mapped to any matter.</p>
+              <div id="held-unprovisioned-list"></div>
+            </div>
+            <div class="glass-panel">
+              <h3>Unrouted Loose Files</h3>
+              <p class="empty-state-sub">Files placed in repository root without a matter subfolder.</p>
+              <div id="held-unrouted-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="approvals-section">
+          <h2>Recent Executions</h2>
+          <div class="glass-panel">
+            <div id="approvals-executions-list"></div>
+          </div>
         </div>
       </section>
 

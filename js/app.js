@@ -1,3 +1,4 @@
+import { initApprovalsView } from './approvals.js';
 import { supabase } from './supabase-client.js';
 import { signInWithGoogle, signOut, getSession, onAuthChange, getCachedGoogleToken, clearGoogleToken } from './auth.js';
 import {
@@ -144,7 +145,11 @@ function renderAuthState() {
 
 async function bootApp() {
   await refreshProjects();
-  await renderOverview();
+  if (window.location.hash.startsWith('#/approvals') || window.location.hash === '#approvals') {
+    handleRoute();
+  } else {
+    await renderOverview();
+  }
 }
 
 // ---------------- Nav ----------------
@@ -160,6 +165,7 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
     if (view === 'overview') renderOverview();
     if (view === 'filetypes') initFiletypesView();
     if (view === 'config') renderConfigTable();
+    if (view === 'approvals') initApprovalsView(state.projects, state.session?.user?.email);
   });
 });
 
@@ -1744,3 +1750,21 @@ function formatBytes(bytes) {
 }
 
 init();
+
+// ---------------- Approvals ----------------
+el('btn-refresh-approvals')?.addEventListener('click', () => {
+  initApprovalsView(state.projects, state.session?.user?.email);
+});
+
+function handleRoute() {
+  const hash = window.location.hash;
+  if (hash.startsWith('#/approvals') || hash === '#approvals') {
+    const btn = document.querySelector('.nav-item[data-view="approvals"]');
+    if (btn && !btn.classList.contains('is-active')) {
+      btn.click();
+    } else if (btn) {
+      initApprovalsView(state.projects, state.session?.user?.email);
+    }
+  }
+}
+window.addEventListener('hashchange', handleRoute);

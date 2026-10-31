@@ -625,3 +625,164 @@ input[type="checkbox"].row-check, #check-all {
 
 .dialog-form label.checkbox-row { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
 .dialog-form label.checkbox-row input { margin-top: 3px; accent-color: var(--accent-lime); }
+
+
+/* ---------- Approvals View ---------- */
+.approvals-section {
+  margin-top: 32px;
+}
+.approvals-section h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  color: var(--text-primary);
+}
+.approvals-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+}
+
+.approval-card {
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-border);
+  transition: all 0.2s var(--ease-glass);
+}
+.approval-card:hover {
+  background: var(--glass-fill-strong);
+  border-color: var(--glass-border-strong);
+}
+.approval-card.is-held {
+  border-color: rgba(255, 149, 82, 0.4);
+  background: rgba(255, 149, 82, 0.04);
+}
+.approval-card.is-highlighted {
+  border-color: var(--accent-lime);
+  box-shadow: 0 0 20px rgba(195, 245, 58, 0.2);
+}
+
+.approval-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.approval-meta {
+  flex: 1;
+}
+.approval-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.approval-matter-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.approval-sub-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.meta-sep {
+  color: var(--text-muted);
+}
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-lime {
+  background: var(--accent-lime-soft);
+  color: var(--accent-lime);
+  border: 1px solid rgba(195, 245, 58, 0.3);
+}
+.badge-orange {
+  background: var(--accent-orange-soft);
+  color: var(--accent-orange);
+  border: 1px solid rgba(255, 149, 82, 0.3);
+}
+.badge-held {
+  background: rgba(255, 149, 82, 0.2);
+  color: var(--accent-orange);
+  border: 1px solid var(--accent-orange);
+  font-weight: 700;
+}
+.badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid rgba(255, 107, 106, 0.3);
+}
+
+.approval-files-container {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.held-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 1024px) {
+  .held-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.map-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.select-project-map {
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.select-project-map:focus {
+  border-color: var(--accent-lime);
+}
+
+.cell-filename {
+  font-weight: 500;
+}
+.cell-path {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cell-size, .cell-time {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cell-mime {
+  font-size: 11px;
+}
+
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
