@@ -17,22 +17,40 @@ export async function loadProjects() {
 // show up regardless of how many actually got synced.
 const SELECT_PAGE_SIZE = 1000;
 
+// Keyset pagination on the (project_id, file_name) unique index: each page
+// is an index seek, so cost stays flat no matter how deep we go. Offset
+// pagination re-scans every skipped row and hit the 8s statement timeout
+// around offset 179,000 on MJN.
 export async function loadFiles(projectId) {
   const allRows = [];
-  let from = 0;
+  let last = null;
   while (true) {
-    const { data, error } = await supabase
+    let q = supabase
       .from('ingestion_files')
       .select('*')
       .eq('project_id', projectId)
       .order('file_name', { ascending: true })
-      .range(from, from + SELECT_PAGE_SIZE - 1);
+      .limit(SELECT_PAGE_SIZE);
+    if (last !== null) q = q.gt('file_name', last);
+    const { data, error } = await q;
     if (error) throw error;
     allRows.push(...data);
     if (data.length < SELECT_PAGE_SIZE) break;
-    from += SELECT_PAGE_SIZE;
+    last = data[data.length - 1].file_name;
   }
   return allRows;
+}
+
+// Cheap size check that doesn't depend on the stats RPC: asks for the single
+// row just past `threshold`. If it exists, the project is too large to load.
+export async function projectExceeds(projectId, threshold) {
+  const { data, error } = await supabase
+    .from('ingestion_files')
+    .select('id')
+    .eq('project_id', projectId)
+    .range(threshold, threshold);
+  if (error) throw error;
+  return data.length > 0;
 }
 
 export async function addProject(fields) {

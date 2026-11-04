@@ -4,6 +4,7 @@ import { signInWithGoogle, signOut, getSession, onAuthChange, getCachedGoogleTok
 import {
   loadProjects,
   loadFiles,
+  projectExceeds,
   addProject,
   updateProject,
   setFileStatus,
@@ -421,7 +422,7 @@ async function loadAndRenderProjectFiles(projectId) {
     stats = await loadSingleProjectStats(projectId);
     if (stats) state.projectProgress.set(projectId, stats);
   } catch {
-    // fall through — if the stats query fails, just try the normal path
+    // stats failed — size is probed below before any full load
   }
   renderProjectBar();
   if (state.activeProjectId === projectId) {
@@ -436,11 +437,30 @@ async function loadAndRenderProjectFiles(projectId) {
     renderLargeProjectStats(stats);
     return;
   }
+  // Stats unavailable: never fall back to pulling every row blind — probe size first.
+  if (!stats && (await projectExceeds(projectId, LARGE_PROJECT_THRESHOLD))) {
+    state.files = [];
+    state.selectedFileIds = new Set();
+    state.activeFilter = null;
+    renderStatsUnavailable();
+    return;
+  }
 
   state.files = await loadFiles(projectId);
   state.selectedFileIds = new Set();
   state.activeFilter = null;
   renderFileTable();
+}
+
+function renderStatsUnavailable() {
+  el('filter-bar').hidden = true;
+  el('bulk-bar').hidden = true;
+  el('file-table').hidden = true;
+  el('empty-state').hidden = false;
+  el('empty-state').innerHTML = `
+    <p>More than ${LARGE_PROJECT_THRESHOLD.toLocaleString()} files tracked — too many to list here.</p>
+    <p class="empty-state-sub">The totals query didn't respond in time, so totals aren't shown right now. Your sync results are saved. Refresh in a minute to see totals.</p>
+  `;
 }
 
 function renderLargeProjectStats(stats) {
@@ -963,13 +983,17 @@ async function selectFiletypesProject(projectId) {
   try {
     stats = await loadSingleProjectStats(projectId);
   } catch {
-    // fall through — if the stats query fails, just try the normal path
+    // stats failed — size is probed below before any full load
   }
-  if (stats && Number(stats.total_files) > LARGE_PROJECT_THRESHOLD) {
+  let tooLarge = stats && Number(stats.total_files) > LARGE_PROJECT_THRESHOLD;
+  if (!stats) {
+    try { tooLarge = await projectExceeds(projectId, LARGE_PROJECT_THRESHOLD); } catch { tooLarge = true; }
+  }
+  if (tooLarge) {
     filetypesState.files = [];
     el('filetypes-panel').hidden = true;
     el('filetypes-empty').hidden = false;
-    el('filetypes-empty').innerHTML = `<p>${Number(stats.total_files).toLocaleString()} files tracked — too many to break down by type here.</p><p class="empty-state-sub">Loading this many rows would crash the browser tab. Use the Ingestion Tracker's stats for this project instead.</p>`;
+    el('filetypes-empty').innerHTML = `<p>${stats ? Number(stats.total_files).toLocaleString() : 'More than ' + LARGE_PROJECT_THRESHOLD.toLocaleString()} files tracked — too many to break down by type here.</p><p class="empty-state-sub">Loading this many rows would crash the browser tab. Use the Ingestion Tracker's stats for this project instead.</p>`;
     return;
   }
 
