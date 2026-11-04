@@ -1690,13 +1690,44 @@ function openProjectDialog(project) {
   el('project-dialog').showModal();
 }
 
+// Accepts a bare Drive folder ID or a pasted Drive URL and returns just the ID.
+// Handles .../folders/<id>?usp=..., ...open?id=<id>, and stray "?lfhs=2"-style suffixes.
+function normalizeDriveFolderId(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  const fromPath = s.match(/\/folders\/([A-Za-z0-9_-]+)/);
+  if (fromPath) return fromPath[1];
+  const fromQuery = s.match(/[?&]id=([A-Za-z0-9_-]+)/);
+  if (fromQuery) return fromQuery[1];
+  const bare = s.split(/[?#&\s/]/)[0];
+  return bare || null;
+}
+
+// Accepts "bucket", "gs://bucket", "gs://bucket/" or a console URL and returns just the bucket name.
+function normalizeBucketName(raw) {
+  let s = (raw || '').trim();
+  const fromConsole = s.match(/storage\/browser\/([^/?#]+)/);
+  if (fromConsole) return fromConsole[1];
+  s = s.replace(/^gs:\/\//i, '');
+  return s.split(/[/?#\s]/)[0];
+}
+
 el('project-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const driveRaw = el('f-drive-folder').value;
+  const driveId = normalizeDriveFolderId(driveRaw);
+  if (driveId && !/^[A-Za-z0-9_-]{10,}$/.test(driveId)) {
+    alert(`"${driveRaw.trim()}" doesn't look like a Drive folder ID or link. Paste the folder's link from Drive.`);
+    return;
+  }
+  el('f-drive-folder').value = driveId || '';
+  const bucket = normalizeBucketName(el('f-gcs-bucket').value);
+  el('f-gcs-bucket').value = bucket;
   const fields = {
     slug: el('f-slug').value.trim(),
     display_name: el('f-display-name').value.trim(),
-    drive_folder_id: el('f-drive-folder').value.trim() || null,
-    gcs_bucket_name: el('f-gcs-bucket').value.trim(),
+    drive_folder_id: driveId,
+    gcs_bucket_name: bucket,
     gcp_project_id: el('f-gcp-project').value.trim() || null,
     notes: el('f-notes').value.trim() || null,
     exclude_from_sync_all: el('f-exclude-sync-all').checked,
