@@ -376,7 +376,30 @@ async function renderHeldItemsUI(projects, userEmail) {
   const unroutedContainer = el('held-unrouted-list');
 
   try {
-    const { unprovisioned, unrouted } = await loadHeldItems();
+    const { unprovisioned: allUnprovisioned, unrouted } = await loadHeldItems();
+
+    // Self-resolve: if the watcher already auto-created (or an admin already
+    // provisioned) an ingestion_projects row carrying this exact drive_folder_id,
+    // this "unprovisioned" disposition row is stale bookkeeping, not something
+    // that needs a manual pick - there is nothing else it could correctly map
+    // to. The "Map to Matter" dropdown below deliberately excludes any project
+    // that already has a drive_folder_id (so you can't accidentally steal a
+    // folder away from another matter), which means a self-match is otherwise
+    // impossible to select and the row is a dead end forever. Reconcile it
+    // automatically instead.
+    const projectByFolderId = new Map(projects.filter((p) => p.drive_folder_id).map((p) => [p.drive_folder_id, p]));
+    const autoResolved = allUnprovisioned.filter((f) => projectByFolderId.has(f.drive_folder_id));
+    const unprovisioned = allUnprovisioned.filter((f) => !projectByFolderId.has(f.drive_folder_id));
+
+    if (autoResolved.length > 0) {
+      await Promise.all(
+        autoResolved.map((f) =>
+          mapUnprovisionedFolder(f.drive_folder_id, projectByFolderId.get(f.drive_folder_id).id, userEmail || 'system (auto-resolved)').catch(
+            (err) => console.warn(`Auto-resolve failed for folder ${f.drive_folder_id}:`, err)
+          )
+        )
+      );
+    }
 
     // Render Unprovisioned Folders
     if (unprovisioned.length === 0) {
